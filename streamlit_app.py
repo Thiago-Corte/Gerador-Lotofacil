@@ -4,6 +4,7 @@ import itertools
 from collections import Counter
 import requests
 import random
+import plotly.graph_objects as go
 
 # --- Configuração da Página e Constantes ---
 st.set_page_config(page_title="Analisador Lotofácil Ultra", page_icon="💎", layout="wide")
@@ -12,8 +13,8 @@ PREMIO_11_ACERTOS = 6.0
 PREMIO_12_ACERTOS = 12.0
 PREMIO_13_ACERTOS = 30.0
 CUSTO_APOSTA = 3.0
-# --- NOVA PALETA DE CORES PARA O MAPA DE CALOR ---
-HEATMAP_COLORS = ['#F0F0F0', '#D4E8D4', '#B9E0B9', '#9EDB9E', '#82D382', '#67C967', '#4CBF4C', '#30B430', '#15AA15', '#00A000']
+HEATMAP_COLORS_GREEN = ['#F0F0F0', '#D4E8D4', '#B9E0B9', '#9EDB9E', '#82D382', '#67C967', '#4CBF4C', '#30B430', '#15AA15', '#00A000']
+HEATMAP_COLORS_RED = ['#F0F0F0', '#F8D7DA', '#F1B0B7', '#EA8A93', '#E36370', '#DC3D4C', '#D51628', '#C7001A', '#B9000B', '#A90000']
 
 
 # --- FUNÇÕES DE PROCESSAMENTO DE DADOS ---
@@ -26,7 +27,7 @@ def carregar_dados_da_web():
         df_hist.columns = ['Concurso', 'Data Sorteio', 'Bola1', 'Bola2', 'Bola3', 'Bola4', 'Bola5', 'Bola6', 'Bola7', 'Bola8', 'Bola9', 'Bola10', 'Bola11', 'Bola12', 'Bola13', 'Bola14', 'Bola15']
         df_completo = df_hist
     except FileNotFoundError:
-        st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado no seu repositório do GitHub. A aplicação não pode funcionar sem ele. Por favor, faça o upload do arquivo.")
+        st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado no seu repositório do GitHub.")
         return None
     try:
         url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
@@ -38,7 +39,7 @@ def carregar_dados_da_web():
         if not df_completo['Concurso'].isin([df_ultimo['Concurso'][0]]).any():
             df_completo = pd.concat([df_completo, df_ultimo], ignore_index=True)
     except Exception:
-        st.warning(f"Aviso: Não foi possível buscar o último resultado da API da Caixa.")
+        st.warning(f"Aviso: Não foi possível buscar o último resultado da API.")
     for col in df_completo.columns:
         if 'Bola' in col or 'Concurso' in col:
             df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
@@ -100,42 +101,31 @@ def executar_backtest_filtros(_df, n_concursos, min_rep, max_rep, min_imp, max_i
             sorteios_alinhados.append(int(concurso_atual_row['Concurso']))
     return sorteios_alinhados
 
-# --- FUNÇÃO DO MAPA DE CALOR (REESCRITA) ---
-def gerar_mapa_de_calor(dados, titulo):
+def gerar_mapa_de_calor_plotly(dados, titulo, colorscale):
     st.subheader(titulo)
+    volante = [[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15], [16, 17, 18, 19, 20], [21, 22, 23, 24, 25]]
+    valores = [[dados.get(num, 0) for num in row] for row in volante]
+    anotacoes = [[f"{num}<br>({dados.get(num, 0)})" for num in row] for row in volante]
     
-    min_val = min(dados.values())
-    max_val = max(dados.values())
-    
-    html = "<div style='display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px;'>"
-    for i in range(1, 26):
-        valor = dados.get(i, 0)
-        
-        # Normaliza o valor para encontrar o índice da cor
-        if (max_val - min_val) > 0:
-            score_normalizado = (valor - min_val) / (max_val - min_val)
-        else:
-            score_normalizado = 0.5 # Caso todos os valores sejam iguais
-            
-        # Pega o índice da cor na paleta
-        cor_index = int(score_normalizado * (len(HEATMAP_COLORS) - 1))
-        cor_hex = HEATMAP_COLORS[cor_index]
+    fig = go.Figure(data=go.Heatmap(
+        z=valores,
+        text=anotacoes,
+        texttemplate="%{text}",
+        textfont={"size":12},
+        colorscale=colorscale,
+        showscale=False,
+        xgap=5, ygap=5
+    ))
 
-        # Define a cor do texto para garantir a legibilidade
-        # Converte o hex para RGB para calcular o brilho
-        h = cor_hex.lstrip('#')
-        r, g, b = tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
-        brilho = (r*299 + g*587 + b*114) / 1000
-        cor_texto = 'white' if brilho < 128 else 'black'
-
-        html += f"""
-        <div style='background-color: {cor_hex}; border-radius: 8px; padding: 10px; text-align: center; color: {cor_texto}; border: 1px solid #ddd;'>
-            <div style='font-size: 1.2em; font-weight: bold;'>{i:02d}</div>
-            <div style='font-size: 0.8em;'>({valor})</div>
-        </div>
-        """
-    html += "</div>"
-    st.markdown(html, unsafe_allow_html=True)
+    fig.update_layout(
+        height=450,
+        margin=dict(t=20, l=10, r=10, b=10),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, autorange='reversed'),
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)'
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 # --- INÍCIO DA APLICAÇÃO ---
 st.title("🚀 Analisador Lotofácil Ultra")
@@ -156,7 +146,6 @@ if df_resultados is not None and not df_resultados.empty:
     tab_gerador, tab_analise, tab_conferidor, tab_backtest, tab_simulacao, tab_mapa_calor = st.tabs(tabs)
 
     with tab_gerador:
-        # Código completo da aba Gerador...
         st.header("Gerador de Jogos com Filtros Estratégicos")
         st.sidebar.header("Defina sua Estratégia de Geração")
         st.sidebar.subheader("✨ Sugestão Inteligente")
@@ -196,7 +185,7 @@ if df_resultados is not None and not df_resultados.empty:
                             for i, jogo in enumerate(jogos_filtrados[:50]):
                                 jogo_str = ", ".join(f"{num:02d}" for num in jogo)
                                 [c1,c2,c3][i % 3].text(f"Jogo {i+1:03d}: [ {jogo_str} ]")
-        except Exception as e:
+        except Exception:
             st.error(f"Ocorreu um erro ao gerar os jogos. Verifique as dezenas inseridas.")
 
     with tab_analise:
@@ -355,8 +344,8 @@ if df_resultados is not None and not df_resultados.empty:
                         st.success(f"**13 Acertos:** {premios[13]} prêmio(s) (Receita: R$ {receita_13:,.2f})")
                         st.warning(f"**14 Acertos:** {premios[14]} prêmio(s) (valor variável)")
                         st.error(f"**15 Acertos:** {premios[15]} prêmio(s) (valor variável)")
-            except Exception as e:
-                st.error(f"Ocorreu um erro ao processar os jogos colados para simulação.")
+            except Exception:
+                st.error("Ocorreu um erro ao processar os jogos colados para simulação.")
 
     with tab_mapa_calor:
         st.header("🗺️ Mapa de Calor do Volante")
@@ -365,14 +354,14 @@ if df_resultados is not None and not df_resultados.empty:
             ("Frequência Geral", "Frequência (Últimos 200 Sorteios)", "Atraso Atual"))
         if tipo_analise == "Frequência Geral":
             frequencia_geral, _ = analisar_frequencia_e_atraso(todos_os_sorteios)
-            gerar_mapa_de_calor(frequencia_geral, "Frequência de cada dezena em todo o histórico")
+            gerar_mapa_de_calor_plotly(frequencia_geral, "Frequência de cada dezena em todo o histórico", "Greens")
         elif tipo_analise == "Frequência (Últimos 200 Sorteios)":
             sorteios_recentes = extrair_numeros(df_resultados.tail(200))
             frequencia_recente = Counter(itertools.chain(*sorteios_recentes))
-            gerar_mapa_de_calor(frequencia_recente, "Frequência de cada dezena nos últimos 200 sorteios")
+            gerar_mapa_de_calor_plotly(frequencia_recente, "Frequência de cada dezena nos últimos 200 sorteios", "Greens")
         elif tipo_analise == "Atraso Atual":
             _, atraso_atual = analisar_frequencia_e_atraso(todos_os_sorteios)
-            gerar_mapa_de_calor(atraso_atual, "Atraso (nº de concursos sem sair) de cada dezena")
+            gerar_mapa_de_calor_plotly(atraso_atual, "Atraso (nº de concursos sem sair) de cada dezena", "Reds")
 
 else:
     st.warning("Aguardando o carregamento dos dados...")
