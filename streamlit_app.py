@@ -14,8 +14,8 @@ PREMIO_11_ACERTOS = 6.0
 PREMIO_12_ACERTOS = 12.0
 PREMIO_13_ACERTOS = 30.0
 CUSTO_APOSTA = 3.0
-HEATMAP_COLORS_GREEN = ['#F0F0F0', '#D4E8D4', '#B9E0B9', '#9EDB9E', '#82D382', '#67C967', '#4CBF4C', '#30B430', '#15AA15', '#00A000']
-HEATMAP_COLORS_RED = ['#F0F0F0', '#F8D7DA', '#F1B0B7', '#EA8A93', '#E36370', '#DC3D4C', '#D51628', '#C7001A', '#B9000B', '#A90000']
+HEATMAP_COLORS_GREEN = ['#F7F7F7', '#D9F0D9', '#B8E5B8', '#98DB98', '#77D177', '#56C756', '#34BE34', '#11B411', '#00AA00', '#008B00']
+HEATMAP_COLORS_RED = ['#F7F7F7', '#FADBD8', '#F5B7B1', '#F0928A', '#EB6E62', '#E6473B', '#E02113', '#C7000E', '#B3000C', '#A2000A']
 
 # --- FUNÇÕES DE PROCESSAMENTO DE DADOS ---
 @st.cache_data(ttl=3600)
@@ -27,7 +27,7 @@ def carregar_dados_da_web():
         df_hist.columns = ['Concurso', 'Data Sorteio', 'Bola1', 'Bola2', 'Bola3', 'Bola4', 'Bola5', 'Bola6', 'Bola7', 'Bola8', 'Bola9', 'Bola10', 'Bola11', 'Bola12', 'Bola13', 'Bola14', 'Bola15']
         df_completo = df_hist
     except FileNotFoundError:
-        st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado no seu repositório do GitHub. A aplicação não pode funcionar sem ele. Por favor, faça o upload do arquivo.")
+        st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado no seu repositório do GitHub.")
         return None
     try:
         url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
@@ -39,7 +39,7 @@ def carregar_dados_da_web():
         if not df_completo['Concurso'].isin([df_ultimo['Concurso'][0]]).any():
             df_completo = pd.concat([df_completo, df_ultimo], ignore_index=True)
     except Exception:
-        st.warning(f"Aviso: Não foi possível buscar o último resultado da API da Caixa.")
+        st.warning(f"Aviso: Não foi possível buscar o último resultado da API.")
     for col in df_completo.columns:
         if 'Bola' in col or 'Concurso' in col:
             df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
@@ -140,20 +140,18 @@ if df_resultados is not None and not df_resultados.empty:
     # --- BARRA LATERAL (SIDEBAR) ---
     with st.sidebar:
         st.header("Defina sua Estratégia")
-        
         st.subheader("✨ Sugestão Inteligente")
         if st.button("Sugerir Universo (Análise de 1000 Sorteios)"):
             with st.spinner("Analisando 1000 sorteios..."):
                 universo = sugerir_universo_estrategico(df_resultados, todos_os_sorteios)
                 st.session_state.sugeridas = ", ".join(map(str, universo))
                 st.session_state.dezenas_gerador = st.session_state.sugeridas
-        
         dezenas_str = st.text_area("Seu universo de dezenas:", value=st.session_state.sugeridas, height=150, key="dezenas_gerador")
-        
         st.subheader("Filtros do Gerador")
         min_rep, max_rep = st.slider("Repetidas:", 0, 15, (8, 10), key='slider_rep_gerador')
         min_imp, max_imp = st.slider("Ímpares:", 0, 15, (7, 9), key='slider_imp_gerador')
 
+        # --- FUNCIONALIDADE DE SALVAR / CARREGAR ESTRATÉGIA ---
         with st.expander("💾 Salvar / Carregar Estratégia"):
             if st.button("Gerar Código para Salvar"):
                 estrategia_atual = {
@@ -162,10 +160,8 @@ if df_resultados is not None and not df_resultados.empty:
                     "filtro_impares": st.session_state.slider_imp_gerador
                 }
                 st.session_state.codigo_estrategia = json.dumps(estrategia_atual, indent=2)
-            
             if st.session_state.codigo_estrategia:
                 st.code(st.session_state.codigo_estrategia, language='json')
-
             codigo_para_carregar = st.text_area("Cole o código da estratégia aqui para carregar:")
             if st.button("Carregar Estratégia"):
                 try:
@@ -174,16 +170,17 @@ if df_resultados is not None and not df_resultados.empty:
                     st.session_state.dezenas_gerador = dados_carregados.get("universo_dezenas", "")
                     st.session_state.slider_rep_gerador = tuple(dados_carregados.get("filtro_repetidas", (8, 10)))
                     st.session_state.slider_imp_gerador = tuple(dados_carregados.get("filtro_impares", (7, 9)))
-                    st.success("Estratégia carregada com sucesso!")
+                    st.success("Estratégia carregada!")
                     st.experimental_rerun()
-                except Exception:
-                    st.error(f"Erro ao carregar o código. Verifique se está no formato correto.")
+                except Exception as e:
+                    st.error(f"Erro ao carregar o código.")
 
     # --- ABAS PRINCIPAIS ---
     tabs = ["🎯 Gerador", "📊 Análise", "✅ Conferidor", "🔬 Backtesting", "💰 Simulação", "🗺️ Mapa de Calor"]
     tab_gerador, tab_analise, tab_conferidor, tab_backtest, tab_simulacao, tab_mapa_calor = st.tabs(tabs)
 
     with tab_gerador:
+        # (código completo da aba)
         st.header("Gerador de Jogos com Filtros Estratégicos")
         try:
             if dezenas_str:
@@ -216,6 +213,7 @@ if df_resultados is not None and not df_resultados.empty:
             st.error(f"Ocorreu um erro ao gerar os jogos. Verifique as dezenas inseridas.")
 
     with tab_analise:
+        # (código completo da aba)
         st.header("Painel de Análise de Tendências Históricas")
         st.write(f"Análises baseadas em todos os {ultimo_concurso_num} concursos.")
         frequencia, atraso = analisar_frequencia_e_atraso(todos_os_sorteios)
@@ -234,6 +232,7 @@ if df_resultados is not None and not df_resultados.empty:
             st.dataframe(pd.DataFrame(encontrar_combinacoes_frequentes(todos_os_sorteios, 3), columns=['Trio', 'Vezes']), use_container_width=True)
         
     with tab_conferidor:
+        # (código completo da aba)
         st.header("✅ Conferidor de Jogos")
         st.write("Cole seus jogos e o resultado do sorteio para ver seus acertos.")
         c1, c2 = st.columns(2)
@@ -274,6 +273,7 @@ if df_resultados is not None and not df_resultados.empty:
                 st.error(f"Ocorreu um erro ao conferir os jogos. Verifique se os números foram digitados corretamente.")
 
     with tab_backtest:
+        # (código completo da aba)
         st.header("🔬 Backtesting de Filtros")
         st.info("Valide a eficácia de uma estratégia de filtros contra os resultados passados.")
         n_concursos_filtros = st.number_input("Analisar os últimos X concursos:", min_value=10, max_value=len(df_resultados)-1, value=100, step=10, key="n_filtros")
@@ -298,6 +298,7 @@ if df_resultados is not None and not df_resultados.empty:
                 st.write(st.session_state.sorteios_alinhados)
     
     with tab_simulacao:
+        # (código completo da aba)
         st.header("💰 Simulação Avançada")
         st.info("Use os resultados de um backtest (da aba anterior) ou cole um conjunto de jogos para análises avançadas.")
         st.write("---")
