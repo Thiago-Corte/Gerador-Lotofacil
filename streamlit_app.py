@@ -53,22 +53,25 @@ def carregar_dados_da_web():
     
     return df_completo.sort_values(by='Concurso').reset_index(drop=True)
 
+
 @st.cache_data
 def extrair_numeros(_df):
     bola_cols = [col for col in _df.columns if col.startswith('Bola')]
     return _df[bola_cols].dropna().astype(int).values.tolist()
 
 @st.cache_data
-def analisar_frequencia_e_atraso(_numeros_sorteados):
+def analisar_frequencia_e_atraso(_numeros_sorteados, total_concursos_geral):
     frequencia = Counter(itertools.chain(*_numeros_sorteados))
     atraso = {}
-    total_concursos = len(_numeros_sorteados)
+    
     for dezena in range(1, 26):
         try:
-            ultimo_sorteio_idx = max(i for i, sorteio in enumerate(_numeros_sorteados) if dezena in sorteio)
-            atraso[dezena] = total_concursos - 1 - ultimo_sorteio_idx
+            # Encontra o índice do último sorteio em que a dezena apareceu na lista GERAL
+            ultimo_sorteio_idx_geral = max(i for i, sorteio in enumerate(todos_os_sorteios) if dezena in sorteio)
+            atraso[dezena] = total_concursos_geral - 1 - ultimo_sorteio_idx_geral
         except ValueError:
-            atraso[dezena] = total_concursos
+            atraso[dezena] = total_concursos_geral
+            
     return frequencia, atraso
 
 @st.cache_data
@@ -76,34 +79,38 @@ def encontrar_combinacoes_frequentes(_numeros_sorteados, tamanho):
     todas_as_combinacoes = itertools.chain.from_iterable(itertools.combinations(sorteio, tamanho) for sorteio in _numeros_sorteados)
     return Counter(todas_as_combinacoes).most_common(15)
 
-# --- NOVA FUNÇÃO: MOTOR DE SUGESTÃO ---
+# --- FUNÇÃO CORRIGIDA: MOTOR DE SUGESTÃO ---
 @st.cache_data
-def sugerir_universo_estrategico(_df, num_sorteios=1000, tamanho_universo=19):
+def sugerir_universo_estrategico(_df, _todos_os_sorteios, num_sorteios=1000, tamanho_universo=19):
     """
     Analisa os últimos 1000 jogos e sugere um universo de 19 dezenas
-    combinando frequência e atraso.
+    combinando frequência e atraso. CORRIGIDO PARA USAR TODAS AS 25 DEZENAS.
     """
     df_recente = _df.tail(num_sorteios)
     numeros_recentes = extrair_numeros(df_recente)
     
-    # Análise de Frequência e Atraso no período
-    frequencia, atraso = analisar_frequencia_e_atraso(numeros_recentes)
+    # Análise de Frequência no período recente de 1000 jogos
+    frequencia_recente = Counter(itertools.chain(*numeros_recentes))
+    
+    # Análise de Atraso considerando o histórico GERAL
+    _, atraso_geral = analisar_frequencia_e_atraso(numeros_recentes, len(_todos_os_sorteios))
     
     scores = {}
-    max_freq = max(frequencia.values())
-    max_atraso = max(atraso.values())
+    # Normalização dos scores
+    max_freq = max(frequencia_recente.values()) if frequencia_recente else 1
+    max_atraso = max(atraso_geral.values()) if atraso_geral else 1
 
     for dezena in range(1, 26):
-        # Score de Frequência (normalizado)
-        score_freq = frequencia.get(dezena, 0) / max_freq
+        # Score de Frequência (0 a 1)
+        score_freq = frequencia_recente.get(dezena, 0) / max_freq
         
-        # Score de Atraso (normalizado)
-        score_atraso = atraso.get(dezena, 0) / max_atraso
+        # Score de Atraso (0 a 1)
+        score_atraso = atraso_geral.get(dezena, 0) / max_atraso
         
-        # Score Combinado (50% Frequência, 50% Atraso)
-        scores[dezena] = (0.5 * score_freq) + (0.5 * score_atraso)
+        # Score Combinado (60% Frequência nos últimos 1000 jogos, 40% Atraso geral)
+        scores[dezena] = (0.6 * score_freq) + (0.4 * score_atraso)
         
-    # Ordena as dezenas pelo score e retorna as melhores
+    # Ordena as dezenas pelo score combinado e retorna as melhores
     dezenas_ordenadas = sorted(scores.items(), key=lambda item: item[1], reverse=True)
     
     universo_sugerido = [dezena for dezena, score in dezenas_ordenadas[:tamanho_universo]]
@@ -133,13 +140,11 @@ if df_resultados is not None and not df_resultados.empty:
         
         st.sidebar.header("Defina sua Estratégia de Geração")
         
-        # --- NOVO BLOCO: MOTOR DE SUGESTÃO ---
         st.sidebar.subheader("✨ Sugestão Inteligente")
         if st.sidebar.button("Sugerir Universo (Análise de 1000 Sorteios)"):
             with st.spinner("Analisando 1000 sorteios... Isso pode levar um momento."):
-                universo = sugerir_universo_estrategico(df_resultados)
+                universo = sugerir_universo_estrategico(df_resultados, todos_os_sorteios)
                 st.session_state.sugeridas = ", ".join(map(str, universo))
-        # --- FIM DO NOVO BLOCO ---
         
         dezenas_str = st.sidebar.text_area("Seu universo de dezenas (separadas por vírgula):", value=st.session_state.sugeridas, height=150)
         st.sidebar.subheader("Filtros:")
@@ -147,31 +152,32 @@ if df_resultados is not None and not df_resultados.empty:
         min_imp, max_imp = st.sidebar.slider("Quantidade de Dezenas Ímpares:", 0, 15, (7, 9), key='slider_imp')
         
         try:
-            dezenas_escolhidas = sorted(list(set([int(num.strip()) for num in dezenas_str.split(',') if num.strip()])))
-            st.write(f"**Universo de {len(dezenas_escolhidas)} dezenas escolhido:** `{dezenas_escolhidas}`")
-            ultimo_concurso_numeros = set(todos_os_sorteios[-1])
-            st.info(f"Analisando com base no Concurso **{ultimo_concurso_num}** de dezenas: `{sorted(list(ultimo_concurso_numeros))}`")
-            if st.button("Gerar Jogos 🚀", type="primary"):
-                if len(dezenas_escolhidas) < 15:
-                     st.error("Erro: Você precisa escolher pelo menos 15 dezenas.")
-                else:
-                    combinacoes = list(itertools.combinations(dezenas_escolhidas, 15))
-                    jogos_filtrados = []
-                    for jogo_tupla in combinacoes:
-                        jogo_set = set(jogo_tupla)
-                        if not (min_rep <= len(jogo_set.intersection(ultimo_concurso_numeros)) <= max_rep): continue
-                        if not (min_imp <= len([n for n in jogo_set if n % 2 != 0]) <= max_imp): continue
-                        jogos_filtrados.append(sorted(list(jogo_set)))
-                    st.success(f"De **{len(combinacoes)}** jogos possíveis, **{len(jogos_filtrados)}** foram selecionados após os filtros.")
-                    if jogos_filtrados:
-                        st.write("---")
-                        if len(jogos_filtrados) > 20:
-                             st.info(f"Mostrando os primeiros 20 jogos de {len(jogos_filtrados)} gerados.")
-                        col1, col2, col3 = st.columns(3)
-                        for i, jogo in enumerate(jogos_filtrados[:20]): # Mostra no máximo 20 jogos
-                            jogo_str = ", ".join(f"{num:02d}" for num in jogo)
+            if dezenas_str:
+                dezenas_escolhidas = sorted(list(set([int(num.strip()) for num in dezenas_str.split(',') if num.strip()])))
+                st.write(f"**Universo de {len(dezenas_escolhidas)} dezenas escolhido:** `{dezenas_escolhidas}`")
+                ultimo_concurso_numeros = set(todos_os_sorteios[-1])
+                st.info(f"Analisando com base no Concurso **{ultimo_concurso_num}** de dezenas: `{sorted(list(ultimo_concurso_numeros))}`")
+                if st.button("Gerar Jogos 🚀", type="primary"):
+                    if len(dezenas_escolhidas) < 15:
+                         st.error("Erro: Você precisa escolher pelo menos 15 dezenas.")
+                    else:
+                        combinacoes = list(itertools.combinations(dezenas_escolhidas, 15))
+                        jogos_filtrados = []
+                        for jogo_tupla in combinacoes:
+                            jogo_set = set(jogo_tupla)
+                            if not (min_rep <= len(jogo_set.intersection(ultimo_concurso_numeros)) <= max_rep): continue
+                            if not (min_imp <= len([n for n in jogo_set if n % 2 != 0]) <= max_imp): continue
+                            jogos_filtrados.append(sorted(list(jogo_set)))
+                        st.success(f"De **{len(combinacoes)}** jogos possíveis, **{len(jogos_filtrados)}** foram selecionados após os filtros.")
+                        if jogos_filtrados:
+                            st.write("---")
+                            if len(jogos_filtrados) > 20:
+                                 st.info(f"Mostrando os primeiros 20 jogos de {len(jogos_filtrados)} gerados.")
+                            col1, col2, col3 = st.columns(3)
                             colunas = [col1, col2, col3]
-                            colunas[i % 3].text(f"Jogo {i+1:03d}: [ {jogo_str} ]")
+                            for i, jogo in enumerate(jogos_filtrados[:20]):
+                                jogo_str = ", ".join(f"{num:02d}" for num in jogo)
+                                colunas[i % 3].text(f"Jogo {i+1:03d}: [ {jogo_str} ]")
         except Exception as e:
             st.error(f"Ocorreu um erro ao gerar os jogos. Verifique se as dezenas foram inseridas corretamente. Detalhe: {e}")
 
@@ -179,7 +185,7 @@ if df_resultados is not None and not df_resultados.empty:
     with tab2:
         st.header("Painel de Análise de Tendências Históricas")
         st.write(f"Análises baseadas em todos os {ultimo_concurso_num} concursos.")
-        frequencia, atraso = analisar_frequencia_e_atraso(todos_os_sorteios)
+        frequencia, atraso = analisar_frequencia_e_atraso(todos_os_sorteios, len(todos_os_sorteios))
         df_freq = pd.DataFrame(frequencia.most_common(25), columns=['Dezena', 'Frequência']).set_index('Dezena')
         df_atraso = pd.DataFrame(atraso.items(), columns=['Dezena', 'Atraso (concursos)']).sort_values(by='Atraso (concursos)', ascending=False).set_index('Dezena')
         col1, col2 = st.columns(2)
@@ -222,17 +228,22 @@ if df_resultados is not None and not df_resultados.empty:
                     else:
                         st.write("---")
                         st.subheader("Resultado da Conferência")
+                        
                         resultados_conferencia = []
                         premios = Counter()
+                        
                         for i, jogo_set in enumerate(jogos):
                             if len(jogo_set) > 0:
                                 acertos = len(jogo_set.intersection(resultado_set))
                                 jogo_formatado = ", ".join(map(str, sorted(list(jogo_set))))
                                 resultados_conferencia.append({'Jogo': jogo_formatado, 'Acertos': acertos})
+                                
                                 if acertos >= 11:
                                     premios[acertos] += 1
+
                         df_conferencia = pd.DataFrame(resultados_conferencia)
                         st.dataframe(df_conferencia, use_container_width=True)
+                        
                         st.write("---")
                         st.subheader("Resumo de Prêmios")
                         if sum(premios.values()) > 0:
@@ -240,8 +251,10 @@ if df_resultados is not None and not df_resultados.empty:
                                 st.success(f"Você teve **{qtd}** jogo(s) com **{acertos}** acertos!")
                         else:
                             st.info("Nenhum jogo premiado (11 ou mais acertos).")
+
             except Exception as e:
-                st.error(f"Ocorreu um erro ao conferir os jogos. Verifique se os números foram digitados corretamente. Detalhe: {e}")
+                st.error(f"Ocorreu um erro ao conferir os jogos. Verifique se os números foram digitados corretamente.")
+                st.error(f"Detalhe: {e}")
 
 else:
     st.warning("Aguardando o carregamento dos dados... A API da Caixa pode estar temporariamente indisponível ou o arquivo Excel não foi encontrado no repositório.")
