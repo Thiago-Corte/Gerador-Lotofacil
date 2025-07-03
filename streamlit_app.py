@@ -6,7 +6,7 @@ import requests
 import random
 
 # --- Configuração da Página e Constantes ---
-st.set_page_config(page_title="Analisador Lotofácil Pro", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="Analisador Lotofácil Ultra", page_icon="💎", layout="wide")
 MOLDURA_DEZENAS = {1, 2, 3, 4, 5, 6, 10, 11, 15, 16, 20, 21, 22, 23, 24, 25}
 
 # --- FUNÇÕES DE PROCESSAMENTO DE DADOS ---
@@ -25,7 +25,7 @@ def carregar_dados_da_web():
         df_completo = df_hist
 
     except FileNotFoundError:
-        st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado no seu repositório do GitHub. Por favor, faça o upload do arquivo.")
+        st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado no seu repositório do GitHub. Por favor, faça o upload do arquivo para que a aplicação funcione.")
         return None
         
     try:
@@ -72,9 +72,9 @@ def analisar_frequencia_e_atraso(_todos_os_sorteios):
     return frequencia, atraso
 
 @st.cache_data
-def encontrar_combinacoes_frequentes(_numeros_sorteados, tamanho):
+def encontrar_combinacoes_frequentes(_numeros_sorteados, tamanho, top_n=15):
     todas_as_combinacoes = itertools.chain.from_iterable(itertools.combinations(sorteio, tamanho) for sorteio in _numeros_sorteados)
-    return Counter(todas_as_combinacoes).most_common(15)
+    return Counter(todas_as_combinacoes).most_common(top_n)
 
 @st.cache_data
 def sugerir_universo_estrategico(_df, _todos_os_sorteios, num_sorteios=1000, tamanho_universo=19):
@@ -117,11 +117,11 @@ def executar_backtest(_df, n_concursos, min_rep, max_rep, min_imp, max_imp, min_
     return sorteios_alinhados
 
 # --- INÍCIO DA APLICAÇÃO ---
-st.title("🚀 Analisador Lotofácil Pro")
+st.title("🚀 Analisador Lotofácil Ultra")
 
-# Inicializa o session_state
 if 'sugeridas' not in st.session_state: st.session_state.sugeridas = ""
 if 'sorteios_alinhados' not in st.session_state: st.session_state.sorteios_alinhados = []
+if 'backtest_rodado' not in st.session_state: st.session_state.backtest_rodado = False
 
 df_resultados = carregar_dados_da_web()
 
@@ -131,9 +131,9 @@ if df_resultados is not None and not df_resultados.empty:
     
     st.success(f"**Dados carregados com sucesso!** Último concurso na base: **{ultimo_concurso_num}**.")
     
-    tab_gerador, tab_analise, tab_conferidor, tab_backtest = st.tabs(["🎯 Gerador de Jogos", "📊 Análise de Tendências", "✅ Conferidor de Jogos", "🔬 Backtesting"])
+    tabs = ["🎯 Gerador de Jogos", "📊 Análise de Tendências", "✅ Conferidor de Jogos", "🔬 Backtesting Ultra"]
+    tab_gerador, tab_analise, tab_conferidor, tab_backtest = st.tabs(tabs)
 
-    # --- Aba 1: Gerador de Jogos ---
     with tab_gerador:
         st.header("Gerador de Jogos com Filtros Estratégicos")
         st.sidebar.header("Defina sua Estratégia de Geração")
@@ -154,7 +154,7 @@ if df_resultados is not None and not df_resultados.empty:
                 st.write(f"**Universo de {len(dezenas_escolhidas)} dezenas escolhido:** `{dezenas_escolhidas}`")
                 ultimo_concurso_numeros = set(todos_os_sorteios[-1])
                 st.info(f"Analisando com base no Concurso **{ultimo_concurso_num}** de dezenas: `{sorted(list(ultimo_concurso_numeros))}`")
-                if st.button("Gerar Jogos 🚀", type="primary"):
+                if st.button("Gerar Jogos 🚀", type="primary", key="gerar_jogos_principal"):
                     if len(dezenas_escolhidas) < 15:
                          st.error("Erro: Você precisa escolher pelo menos 15 dezenas.")
                     else:
@@ -178,7 +178,6 @@ if df_resultados is not None and not df_resultados.empty:
         except Exception as e:
             st.error(f"Ocorreu um erro ao gerar os jogos. Verifique se as dezenas foram inseridas corretamente.")
 
-    # --- Aba 2: Análise de Tendências ---
     with tab_analise:
         st.header("Painel de Análise de Tendências Históricas")
         st.write(f"Análises baseadas em todos os {ultimo_concurso_num} concursos.")
@@ -198,8 +197,7 @@ if df_resultados is not None and not df_resultados.empty:
             st.subheader("💎 Trios de Diamante (Top 15)")
             trios_frequentes = encontrar_combinacoes_frequentes(todos_os_sorteios, 3)
             st.dataframe(pd.DataFrame(trios_frequentes, columns=['Trio', 'Vezes']), use_container_width=True)
-
-    # --- Aba 3: Conferidor de Jogos ---
+        
     with tab_conferidor:
         st.header("✅ Conferidor de Jogos")
         st.write("Cole seus jogos e o resultado do sorteio para ver seus acertos.")
@@ -240,60 +238,75 @@ if df_resultados is not None and not df_resultados.empty:
                                 st.success(f"Você teve **{qtd}** jogo(s) com **{acertos}** acertos!")
                         else:
                             st.info("Nenhum jogo premiado (11 ou mais acertos).")
-            except Exception:
+            except Exception as e:
                 st.error(f"Ocorreu um erro ao conferir os jogos. Verifique se os números foram digitados corretamente.")
 
-    # --- Aba 4: Backtesting ---
     with tab_backtest:
-        st.header("🔬 Backtesting de Estratégias")
-        st.info("Teste a eficácia de uma estratégia de filtros contra os resultados passados.")
-        st.subheader("1. Defina o Período da Análise")
+        st.header("🔬 Backtesting e Geração Ultra")
+        st.info("Valide sua estratégia e gere jogos com base nos resultados de sucesso.")
+        
+        st.subheader("Etapa A: Validar a Estratégia")
         n_concursos_backtest = st.number_input("Analisar os últimos X concursos:", min_value=10, max_value=len(df_resultados)-1, value=200, step=10)
-        st.subheader("2. Defina os Filtros da sua Estratégia")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            bt_min_rep, bt_max_rep = st.slider("Qtd. Dezenas Repetidas:", 0, 15, (8, 10), key='slider_rep_backtest')
-        with col2:
-            bt_min_imp, bt_max_imp = st.slider("Qtd. Dezenas Ímpares:", 0, 15, (7, 9), key='slider_imp_backtest')
-        with col3:
-            bt_min_mold, bt_max_mold = st.slider("Qtd. Dezenas na Moldura:", 0, 16, (9, 11), key='slider_mold_backtest')
+        c1, c2, c3 = st.columns(3)
+        with c1: bt_min_rep, bt_max_rep = st.slider("Repetidas:", 0, 15, (8, 10), key='bt_rep')
+        with c2: bt_min_imp, bt_max_imp = st.slider("Ímpares:", 0, 15, (7, 9), key='bt_imp')
+        with c3: bt_min_mold, bt_max_mold = st.slider("Moldura:", 0, 16, (9, 11), key='bt_mold')
         
         if st.button("Iniciar Backtest ⚡", type="primary"):
+            st.session_state.backtest_rodado = True
             with st.spinner(f"Analisando {n_concursos_backtest} concursos..."):
                 st.session_state.sorteios_alinhados = executar_backtest(df_resultados, n_concursos_backtest, bt_min_rep, bt_max_rep, bt_min_imp, bt_max_imp, bt_min_mold, bt_max_mold)
         
-        if st.session_state.get('sorteios_alinhados'):
+        if st.session_state.backtest_rodado:
             st.write("---")
             st.subheader("Resultado do Backtest")
             total_testado = len(df_resultados.tail(n_concursos_backtest)) -1 
             total_alinhado = len(st.session_state.sorteios_alinhados)
             percentual = (total_alinhado / total_testado * 100) if total_testado > 0 else 0
-            st.metric(label="Percentual de Alinhamento", value=f"{percentual:.1f} %", delta=f"{total_alinhado} de {total_testado} concursos")
+            st.metric(label="Percentual de Alinhamento da Estratégia", value=f"{percentual:.1f} %", delta=f"{total_alinhado} de {total_testado} concursos")
             st.progress(int(percentual))
             with st.expander("Ver concursos que se alinharam com a estratégia"):
                 st.write(st.session_state.sorteios_alinhados)
             
-            st.write("---")
-            st.subheader("3. Super-Otimização")
-            st.write("Use os concursos alinhados acima como base para uma nova geração de jogos.")
-            if st.button("Analisar Sorteios Alinhados e Gerar 50 Jogos", type="primary"):
-                with st.spinner("Analisando os sorteios alinhados e gerando jogos..."):
-                    df_alinhados = df_resultados[df_resultados['Concurso'].isin(st.session_state.sorteios_alinhados)]
-                    numeros_alinhados = extrair_numeros(df_alinhados)
-                    freq_alinhada = Counter(itertools.chain(*numeros_alinhados))
-                    dezenas_elite = [dezena for dezena, freq in freq_alinhada.most_common(19)]
-                    st.success(f"Universo de Elite com 19 dezenas encontrado: `{sorted(dezenas_elite)}`")
-                    combinacoes = list(itertools.combinations(dezenas_elite, 15))
-                    if len(combinacoes) > 50:
-                        jogos_finais = random.sample(combinacoes, 50)
-                    else:
-                        jogos_finais = combinacoes
-                    st.subheader("50 Jogos Otimizados Sugeridos")
-                    col1, col2, col3 = st.columns(3)
-                    for i, jogo in enumerate(jogos_finais):
-                        jogo_str = ", ".join(f"{num:02d}" for num in sorted(list(jogo)))
-                        colunas_jogos = [col1, col2, col3]
-                        colunas_jogos[i % 3].text(f"Jogo {i+1:03d}: [ {jogo_str} ]")
+            if st.session_state.sorteios_alinhados:
+                st.write("---")
+                st.subheader("Etapa B: Análise e Geração Ultra")
+                st.write(f"Análise profunda sobre os **{total_alinhado} concursos** que se alinharam com sua estratégia.")
+
+                df_alinhados = df_resultados[df_resultados['Concurso'].isin(st.session_state.sorteios_alinhados)]
+                numeros_alinhados = extrair_numeros(df_alinhados)
+                freq_alinhada = Counter(itertools.chain(*numeros_alinhados))
+                df_freq_alinhada = pd.DataFrame(freq_alinhada.items(), columns=['Dezena', 'Frequência (nos Alinhados)']).sort_values(by='Frequência (nos Alinhados)', ascending=False).set_index('Dezena')
+                
+                st.dataframe(df_freq_alinhada, use_container_width=True)
+
+                if st.button("Gerar 50 Jogos 'Ultra' com Base Nesta Análise", type="primary"):
+                    with st.spinner("Criando jogos com o Universo de Elite..."):
+                        top_pares = encontrar_combinacoes_frequentes(numeros_alinhados, 2, top_n=20)
+                        top_trios = encontrar_combinacoes_frequentes(numeros_alinhados, 3, top_n=20)
+                        universo_elite = [dezena for dezena, freq in freq_alinhada.most_common(19)]
+                        st.success(f"Universo de Elite com 19 dezenas encontrado: `{sorted(universo_elite)}`")
+
+                        candidatos = list(itertools.combinations(universo_elite, 15))
+                        jogos_com_score = []
+                        for jogo in candidatos:
+                            jogo_set = set(jogo)
+                            score = 0
+                            for par, freq in top_pares:
+                                if set(par).issubset(jogo_set): score += 1
+                            for trio, freq in top_trios:
+                                if set(trio).issubset(jogo_set): score += 3
+                            jogos_com_score.append((jogo, score))
+                        
+                        jogos_com_score.sort(key=lambda x: x[1], reverse=True)
+                        jogos_finais = [jogo for jogo, score in jogos_com_score[:50]]
+                        
+                        st.subheader("🏆 Top 50 Jogos Gerados com a Estratégia Ultra")
+                        c1, c2, c3 = st.columns(3)
+                        for i, jogo in enumerate(jogos_finais):
+                            jogo_str = ", ".join(f"{num:02d}" for num in sorted(list(jogo)))
+                            colunas_jogos = [c1,c2,c3]
+                            colunas_jogos[i % 3].text(f"Jogo {i+1:03d}: [ {jogo_str} ]")
 
 else:
     st.warning("Aguardando o carregamento dos dados...")
