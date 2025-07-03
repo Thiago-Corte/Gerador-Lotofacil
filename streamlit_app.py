@@ -5,6 +5,7 @@ from collections import Counter
 import requests
 import random
 import plotly.graph_objects as go
+import json
 
 # --- Configuração da Página e Constantes ---
 st.set_page_config(page_title="Analisador Lotofácil Ultra", page_icon="💎", layout="wide")
@@ -16,7 +17,6 @@ CUSTO_APOSTA = 3.0
 HEATMAP_COLORS_GREEN = ['#F0F0F0', '#D4E8D4', '#B9E0B9', '#9EDB9E', '#82D382', '#67C967', '#4CBF4C', '#30B430', '#15AA15', '#00A000']
 HEATMAP_COLORS_RED = ['#F0F0F0', '#F8D7DA', '#F1B0B7', '#EA8A93', '#E36370', '#DC3D4C', '#D51628', '#C7001A', '#B9000B', '#A90000']
 
-
 # --- FUNÇÕES DE PROCESSAMENTO DE DADOS ---
 @st.cache_data(ttl=3600)
 def carregar_dados_da_web():
@@ -27,7 +27,7 @@ def carregar_dados_da_web():
         df_hist.columns = ['Concurso', 'Data Sorteio', 'Bola1', 'Bola2', 'Bola3', 'Bola4', 'Bola5', 'Bola6', 'Bola7', 'Bola8', 'Bola9', 'Bola10', 'Bola11', 'Bola12', 'Bola13', 'Bola14', 'Bola15']
         df_completo = df_hist
     except FileNotFoundError:
-        st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado no seu repositório do GitHub.")
+        st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado no seu repositório do GitHub. A aplicação não pode funcionar sem ele. Por favor, faça o upload do arquivo.")
         return None
     try:
         url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
@@ -39,7 +39,7 @@ def carregar_dados_da_web():
         if not df_completo['Concurso'].isin([df_ultimo['Concurso'][0]]).any():
             df_completo = pd.concat([df_completo, df_ultimo], ignore_index=True)
     except Exception:
-        st.warning(f"Aviso: Não foi possível buscar o último resultado da API.")
+        st.warning(f"Aviso: Não foi possível buscar o último resultado da API da Caixa.")
     for col in df_completo.columns:
         if 'Bola' in col or 'Concurso' in col:
             df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
@@ -108,31 +108,26 @@ def gerar_mapa_de_calor_plotly(dados, titulo, colorscale):
     anotacoes = [[f"{num}<br>({dados.get(num, 0)})" for num in row] for row in volante]
     
     fig = go.Figure(data=go.Heatmap(
-        z=valores,
-        text=anotacoes,
-        texttemplate="%{text}",
-        textfont={"size":12},
-        colorscale=colorscale,
-        showscale=False,
-        xgap=5, ygap=5
+        z=valores, text=anotacoes, texttemplate="%{text}", textfont={"size":12},
+        colorscale=colorscale, showscale=False, xgap=5, ygap=5
     ))
 
     fig.update_layout(
-        height=450,
-        margin=dict(t=20, l=10, r=10, b=10),
+        height=450, margin=dict(t=20, l=10, r=10, b=10),
         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, autorange='reversed'),
         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)'
+        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)'
     )
     st.plotly_chart(fig, use_container_width=True)
 
 # --- INÍCIO DA APLICAÇÃO ---
 st.title("🚀 Analisador Lotofácil Ultra")
 
+# Inicializa o session_state
 if 'sugeridas' not in st.session_state: st.session_state.sugeridas = ""
 if 'sorteios_alinhados' not in st.session_state: st.session_state.sorteios_alinhados = []
 if 'backtest_rodado' not in st.session_state: st.session_state.backtest_rodado = False
+if 'codigo_estrategia' not in st.session_state: st.session_state.codigo_estrategia = ""
 
 df_resultados = carregar_dados_da_web()
 
@@ -142,22 +137,54 @@ if df_resultados is not None and not df_resultados.empty:
     
     st.success(f"**Dados carregados com sucesso!** Último concurso na base: **{ultimo_concurso_num}**.")
     
+    # --- BARRA LATERAL (SIDEBAR) ---
+    with st.sidebar:
+        st.header("Defina sua Estratégia")
+        
+        st.subheader("✨ Sugestão Inteligente")
+        if st.button("Sugerir Universo (Análise de 1000 Sorteios)"):
+            with st.spinner("Analisando 1000 sorteios..."):
+                universo = sugerir_universo_estrategico(df_resultados, todos_os_sorteios)
+                st.session_state.sugeridas = ", ".join(map(str, universo))
+                st.session_state.dezenas_gerador = st.session_state.sugeridas
+        
+        dezenas_str = st.text_area("Seu universo de dezenas:", value=st.session_state.sugeridas, height=150, key="dezenas_gerador")
+        
+        st.subheader("Filtros do Gerador")
+        min_rep, max_rep = st.slider("Repetidas:", 0, 15, (8, 10), key='slider_rep_gerador')
+        min_imp, max_imp = st.slider("Ímpares:", 0, 15, (7, 9), key='slider_imp_gerador')
+
+        with st.expander("💾 Salvar / Carregar Estratégia"):
+            if st.button("Gerar Código para Salvar"):
+                estrategia_atual = {
+                    "universo_dezenas": st.session_state.dezenas_gerador,
+                    "filtro_repetidas": st.session_state.slider_rep_gerador,
+                    "filtro_impares": st.session_state.slider_imp_gerador
+                }
+                st.session_state.codigo_estrategia = json.dumps(estrategia_atual, indent=2)
+            
+            if st.session_state.codigo_estrategia:
+                st.code(st.session_state.codigo_estrategia, language='json')
+
+            codigo_para_carregar = st.text_area("Cole o código da estratégia aqui para carregar:")
+            if st.button("Carregar Estratégia"):
+                try:
+                    dados_carregados = json.loads(codigo_para_carregar)
+                    st.session_state.sugeridas = dados_carregados.get("universo_dezenas", "")
+                    st.session_state.dezenas_gerador = dados_carregados.get("universo_dezenas", "")
+                    st.session_state.slider_rep_gerador = tuple(dados_carregados.get("filtro_repetidas", (8, 10)))
+                    st.session_state.slider_imp_gerador = tuple(dados_carregados.get("filtro_impares", (7, 9)))
+                    st.success("Estratégia carregada com sucesso!")
+                    st.experimental_rerun()
+                except Exception:
+                    st.error(f"Erro ao carregar o código. Verifique se está no formato correto.")
+
+    # --- ABAS PRINCIPAIS ---
     tabs = ["🎯 Gerador", "📊 Análise", "✅ Conferidor", "🔬 Backtesting", "💰 Simulação", "🗺️ Mapa de Calor"]
     tab_gerador, tab_analise, tab_conferidor, tab_backtest, tab_simulacao, tab_mapa_calor = st.tabs(tabs)
 
     with tab_gerador:
         st.header("Gerador de Jogos com Filtros Estratégicos")
-        st.sidebar.header("Defina sua Estratégia de Geração")
-        st.sidebar.subheader("✨ Sugestão Inteligente")
-        if st.sidebar.button("Sugerir Universo (Análise de 1000 Sorteios)"):
-            with st.spinner("Analisando 1000 sorteios..."):
-                universo = sugerir_universo_estrategico(df_resultados, todos_os_sorteios)
-                st.session_state.sugeridas = ", ".join(map(str, universo))
-        dezenas_str = st.sidebar.text_area("Seu universo de dezenas:", value=st.session_state.sugeridas, height=150, key="dezenas_gerador")
-        st.sidebar.subheader("Filtros:")
-        min_rep, max_rep = st.sidebar.slider("Repetidas:", 0, 15, (8, 10), key='slider_rep_gerador')
-        min_imp, max_imp = st.sidebar.slider("Ímpares:", 0, 15, (7, 9), key='slider_imp_gerador')
-        
         try:
             if dezenas_str:
                 dezenas_escolhidas = sorted(list(set([int(num.strip()) for num in dezenas_str.split(',') if num.strip()])))
@@ -354,14 +381,14 @@ if df_resultados is not None and not df_resultados.empty:
             ("Frequência Geral", "Frequência (Últimos 200 Sorteios)", "Atraso Atual"))
         if tipo_analise == "Frequência Geral":
             frequencia_geral, _ = analisar_frequencia_e_atraso(todos_os_sorteios)
-            gerar_mapa_de_calor_plotly(frequencia_geral, "Frequência de cada dezena em todo o histórico", "Greens")
+            gerar_mapa_de_calor_plotly(frequencia_geral, "Frequência de cada dezena em todo o histórico", 'Greens')
         elif tipo_analise == "Frequência (Últimos 200 Sorteios)":
             sorteios_recentes = extrair_numeros(df_resultados.tail(200))
             frequencia_recente = Counter(itertools.chain(*sorteios_recentes))
-            gerar_mapa_de_calor_plotly(frequencia_recente, "Frequência de cada dezena nos últimos 200 sorteios", "Greens")
+            gerar_mapa_de_calor_plotly(frequencia_recente, "Frequência de cada dezena nos últimos 200 sorteios", 'Greens')
         elif tipo_analise == "Atraso Atual":
             _, atraso_atual = analisar_frequencia_e_atraso(todos_os_sorteios)
-            gerar_mapa_de_calor_plotly(atraso_atual, "Atraso (nº de concursos sem sair) de cada dezena", "Reds")
+            gerar_mapa_de_calor_plotly(atraso_atual, "Atraso (nº de concursos sem sair) de cada dezena", 'Reds')
 
 else:
     st.warning("Aguardando o carregamento dos dados...")
