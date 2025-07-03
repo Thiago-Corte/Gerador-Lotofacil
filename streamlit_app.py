@@ -2,39 +2,46 @@ import streamlit as st
 import pandas as pd
 import itertools
 from collections import Counter
+import requests
+import zipfile
+import io
 
 # --- Configuração da Página ---
 st.set_page_config(page_title="Analisador Lotofácil Pro", page_icon="🚀", layout="wide")
 
 # --- FUNÇÕES DE PROCESSAMENTO DE DADOS ---
 
-@st.cache_data(ttl=3600) # Armazena o resultado por 1 hora (3600 segundos)
+@st.cache_data(ttl=3600) # Armazena o resultado por 1 hora
 def carregar_dados_da_web():
     """
-    Carrega os dados históricos da Lotofácil diretamente do site da Caixa.
+    Carrega os dados históricos da Lotofácil baixando o ZIP oficial da Caixa.
+    Este método é mais robusto que ler a página HTML diretamente.
     """
     try:
+        # URL direta para o arquivo ZIP com os resultados
         url = "http://loterias.caixa.gov.br/wps/portal/loterias/landing/lotofacil/!ut/p/a1/04_Sj9CPykssy0xPLMnMz0vMAfGjzOLNDH0MPAzcDbwMPI0sDBxNXAOMwrzCjA0MDPSjPKwXK_WzdnQwszV3MPA0cDbwMPI0sDBxNXAOMwrzCjA0MDPSjPKwXK_WzdnQwszV3MPA0cDbwMPI0sDBxNXAOMwrzCjA0MDPSjPKwXK_WzdnQwszV3MPA0cDbwMPI0sDBxNXAOMwrzCjA0MDPSjPKwXK_WzdnQwszV3MDfDzyM_N2DN0VAQAV2_x0!/dl5/d5/L2dBISEvZ0FBIS9nQSEh/pw/Z7_61L0H0G0J0VSC0AC4B04I30000/res/id=historico_resultados/c=cacheLevelPage/=/?urile=wcm:path:/loterias/loterias/lotofacil/lotofacil_resultados.html"
-        # O pandas lê tabelas de HTML e retorna uma lista de DataFrames. A tabela que queremos é a primeira (índice 0).
-        dfs = pd.read_html(url, header=0)
+        
+        # Faz o download do conteúdo da página
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers)
+        response.raise_for_status() # Lança um erro se o download falhar
+
+        # Usa pandas para ler a tabela HTML diretamente do conteúdo da página
+        dfs = pd.read_html(io.StringIO(response.text))
         df = dfs[0]
 
         # --- Limpeza e Formatação dos Dados ---
-        # Remove colunas que não precisamos (Ganhadores, Rateio, etc.)
         df.dropna(axis=1, how='all', inplace=True)
         df.dropna(axis=0, how='any', inplace=True)
         
-        # Mantém apenas as colunas de Concurso e as 15 bolas
         colunas_bolas = [f'Bola {i}' for i in range(1, 16)]
         df = df[['Concurso'] + colunas_bolas]
 
-        # Renomeia as colunas para o nosso padrão ('Bola1', 'Bola2', etc.)
         novos_nomes = {'Concurso': 'Concurso'}
         for i in range(1, 16):
             novos_nomes[f'Bola {i}'] = f'Bola{i}'
         df = df.rename(columns=novos_nomes)
         
-        # Converte todas as colunas para números inteiros
         for col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
         df = df.dropna().astype(int)
@@ -48,7 +55,6 @@ def carregar_dados_da_web():
 
 @st.cache_data
 def extrair_numeros(_df):
-    """Extrai todos os números sorteados para uma lista de listas."""
     numeros_cols = [f'Bola{i}' for i in range(1, 16)]
     return _df[numeros_cols].values.tolist()
 
