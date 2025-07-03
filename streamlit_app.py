@@ -44,7 +44,7 @@ def carregar_dados_da_web():
         if not df_completo['Concurso'].isin([df_ultimo['Concurso'][0]]).any():
             df_completo = pd.concat([df_completo, df_ultimo], ignore_index=True)
 
-    except Exception:
+    except Exception as e:
         st.warning(f"Aviso: Não foi possível buscar o último resultado da API. Usando apenas os dados do seu arquivo Excel.")
 
     for col in df_completo.columns:
@@ -133,25 +133,122 @@ if df_resultados is not None and not df_resultados.empty:
     
     tab_gerador, tab_analise, tab_conferidor, tab_backtest = st.tabs(["🎯 Gerador de Jogos", "📊 Análise de Tendências", "✅ Conferidor de Jogos", "🔬 Backtesting"])
 
+    # --- Aba 1: Gerador de Jogos ---
     with tab_gerador:
         st.header("Gerador de Jogos com Filtros Estratégicos")
-        # (código omitido para brevidade, é o mesmo da versão anterior)
+        st.sidebar.header("Defina sua Estratégia de Geração")
+        st.sidebar.subheader("✨ Sugestão Inteligente")
+        if st.sidebar.button("Sugerir Universo (Análise de 1000 Sorteios)"):
+            with st.spinner("Analisando 1000 sorteios..."):
+                universo = sugerir_universo_estrategico(df_resultados, todos_os_sorteios)
+                st.session_state.sugeridas = ", ".join(map(str, universo))
+        
+        dezenas_str = st.sidebar.text_area("Seu universo de dezenas (separadas por vírgula):", value=st.session_state.sugeridas, height=150, key="dezenas_gerador")
+        st.sidebar.subheader("Filtros:")
+        min_rep, max_rep = st.sidebar.slider("Qtd. Dezenas Repetidas:", 0, 15, (8, 10), key='slider_rep_gerador')
+        min_imp, max_imp = st.sidebar.slider("Qtd. Dezenas Ímpares:", 0, 15, (7, 9), key='slider_imp_gerador')
+        
+        try:
+            if dezenas_str:
+                dezenas_escolhidas = sorted(list(set([int(num.strip()) for num in dezenas_str.split(',') if num.strip()])))
+                st.write(f"**Universo de {len(dezenas_escolhidas)} dezenas escolhido:** `{dezenas_escolhidas}`")
+                ultimo_concurso_numeros = set(todos_os_sorteios[-1])
+                st.info(f"Analisando com base no Concurso **{ultimo_concurso_num}** de dezenas: `{sorted(list(ultimo_concurso_numeros))}`")
+                if st.button("Gerar Jogos 🚀", type="primary"):
+                    if len(dezenas_escolhidas) < 15:
+                         st.error("Erro: Você precisa escolher pelo menos 15 dezenas.")
+                    else:
+                        combinacoes = list(itertools.combinations(dezenas_escolhidas, 15))
+                        jogos_filtrados = []
+                        for jogo_tupla in combinacoes:
+                            jogo_set = set(jogo_tupla)
+                            if not (min_rep <= len(jogo_set.intersection(ultimo_concurso_numeros)) <= max_rep): continue
+                            if not (min_imp <= len([n for n in jogo_set if n % 2 != 0]) <= max_imp): continue
+                            jogos_filtrados.append(sorted(list(jogo_set)))
+                        st.success(f"De **{len(combinacoes)}** jogos possíveis, **{len(jogos_filtrados)}** foram selecionados após os filtros.")
+                        if jogos_filtrados:
+                            st.write("---")
+                            if len(jogos_filtrados) > 50:
+                                 st.info(f"Mostrando os primeiros 50 jogos de {len(jogos_filtrados)} gerados.")
+                            col1, col2, col3 = st.columns(3)
+                            for i, jogo in enumerate(jogos_filtrados[:50]): # Mostra no máximo 50 jogos
+                                jogo_str = ", ".join(f"{num:02d}" for num in jogo)
+                                colunas = [col1, col2, col3]
+                                colunas[i % 3].text(f"Jogo {i+1:03d}: [ {jogo_str} ]")
+        except Exception as e:
+            st.error(f"Ocorreu um erro ao gerar os jogos. Verifique se as dezenas foram inseridas corretamente.")
 
+    # --- Aba 2: Análise de Tendências ---
     with tab_analise:
         st.header("Painel de Análise de Tendências Históricas")
-        # (código omitido para brevidade, é o mesmo da versão anterior)
-        
+        st.write(f"Análises baseadas em todos os {ultimo_concurso_num} concursos.")
+        frequencia, atraso = analisar_frequencia_e_atraso(todos_os_sorteios)
+        df_freq = pd.DataFrame(frequencia.most_common(25), columns=['Dezena', 'Frequência']).set_index('Dezena')
+        df_atraso = pd.DataFrame(atraso.items(), columns=['Dezena', 'Atraso (concursos)']).sort_values(by='Atraso (concursos)', ascending=False).set_index('Dezena')
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("🌡️ Dezenas Quentes e Frias")
+            st.bar_chart(df_freq)
+            st.subheader("✨ Pares de Ouro (Top 15)")
+            pares_frequentes = encontrar_combinacoes_frequentes(todos_os_sorteios, 2)
+            st.dataframe(pd.DataFrame(pares_frequentes, columns=['Par', 'Vezes']), use_container_width=True)
+        with col2:
+            st.subheader("⏳ Dezenas Atrasadas")
+            st.dataframe(df_atraso, use_container_width=True)
+            st.subheader("💎 Trios de Diamante (Top 15)")
+            trios_frequentes = encontrar_combinacoes_frequentes(todos_os_sorteios, 3)
+            st.dataframe(pd.DataFrame(trios_frequentes, columns=['Trio', 'Vezes']), use_container_width=True)
+
+    # --- Aba 3: Conferidor de Jogos ---
     with tab_conferidor:
         st.header("✅ Conferidor de Jogos")
-        # (código omitido para brevidade, é o mesmo da versão anterior)
+        st.write("Cole seus jogos e o resultado do sorteio para ver seus acertos.")
+        col1, col2 = st.columns(2)
+        with col1:
+            jogos_para_conferir = st.text_area("Cole seus jogos aqui (um por linha, dezenas separadas por vírgula)", height=250, placeholder="Ex: 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15\n1,3,5,7,9,11,13,15,17,19,21,22,23,24,25")
+        with col2:
+            resultado_str = st.text_input("Digite o resultado do sorteio (15 dezenas separadas por vírgula)")
+        
+        if st.button("Conferir Meus Jogos", type="primary"):
+            try:
+                resultado_set = set([int(num.strip()) for num in resultado_str.split(',') if num.strip().isdigit()])
+                if len(resultado_set) != 15:
+                    st.error("Erro: O resultado do sorteio deve conter exatamente 15 números válidos.")
+                else:
+                    linhas = jogos_para_conferir.strip().split('\n')
+                    jogos = [set([int(num.strip()) for num in linha.split(',') if num.strip().isdigit()]) for linha in linhas if linha]
+                    if not jogos:
+                        st.warning("Nenhum jogo para conferir. Por favor, cole seus jogos na área de texto.")
+                    else:
+                        st.write("---")
+                        st.subheader("Resultado da Conferência")
+                        resultados_conferencia = []
+                        premios = Counter()
+                        for i, jogo_set in enumerate(jogos):
+                            if len(jogo_set) > 0:
+                                acertos = len(jogo_set.intersection(resultado_set))
+                                jogo_formatado = ", ".join(map(str, sorted(list(jogo_set))))
+                                resultados_conferencia.append({'Jogo': jogo_formatado, 'Acertos': acertos})
+                                if acertos >= 11:
+                                    premios[acertos] += 1
+                        df_conferencia = pd.DataFrame(resultados_conferencia)
+                        st.dataframe(df_conferencia, use_container_width=True)
+                        st.write("---")
+                        st.subheader("Resumo de Prêmios")
+                        if sum(premios.values()) > 0:
+                            for acertos, qtd in sorted(premios.items(), reverse=True):
+                                st.success(f"Você teve **{qtd}** jogo(s) com **{acertos}** acertos!")
+                        else:
+                            st.info("Nenhum jogo premiado (11 ou mais acertos).")
+            except Exception:
+                st.error(f"Ocorreu um erro ao conferir os jogos. Verifique se os números foram digitados corretamente.")
 
+    # --- Aba 4: Backtesting ---
     with tab_backtest:
         st.header("🔬 Backtesting de Estratégias")
         st.info("Teste a eficácia de uma estratégia de filtros contra os resultados passados.")
-        
         st.subheader("1. Defina o Período da Análise")
         n_concursos_backtest = st.number_input("Analisar os últimos X concursos:", min_value=10, max_value=len(df_resultados)-1, value=200, step=10)
-        
         st.subheader("2. Defina os Filtros da sua Estratégia")
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -165,51 +262,38 @@ if df_resultados is not None and not df_resultados.empty:
             with st.spinner(f"Analisando {n_concursos_backtest} concursos..."):
                 st.session_state.sorteios_alinhados = executar_backtest(df_resultados, n_concursos_backtest, bt_min_rep, bt_max_rep, bt_min_imp, bt_max_imp, bt_min_mold, bt_max_mold)
         
-        if st.session_state.sorteios_alinhados:
+        if st.session_state.get('sorteios_alinhados'):
             st.write("---")
             st.subheader("Resultado do Backtest")
-            
             total_testado = len(df_resultados.tail(n_concursos_backtest)) -1 
             total_alinhado = len(st.session_state.sorteios_alinhados)
             percentual = (total_alinhado / total_testado * 100) if total_testado > 0 else 0
-            
             st.metric(label="Percentual de Alinhamento", value=f"{percentual:.1f} %", delta=f"{total_alinhado} de {total_testado} concursos")
             st.progress(int(percentual))
-            
             with st.expander("Ver concursos que se alinharam com a estratégia"):
                 st.write(st.session_state.sorteios_alinhados)
             
-            # --- NOVO BOTÃO E LÓGICA ---
             st.write("---")
-            st.subheader("3. Super-Otimização (Etapa 5)")
+            st.subheader("3. Super-Otimização")
             st.write("Use os concursos alinhados acima como base para uma nova geração de jogos.")
             if st.button("Analisar Sorteios Alinhados e Gerar 50 Jogos", type="primary"):
                 with st.spinner("Analisando os sorteios alinhados e gerando jogos..."):
-                    # Filtra o dataframe principal para pegar apenas os sorteios alinhados
                     df_alinhados = df_resultados[df_resultados['Concurso'].isin(st.session_state.sorteios_alinhados)]
                     numeros_alinhados = extrair_numeros(df_alinhados)
-                    
-                    # Gera um novo universo com base na frequência dentro desses jogos
                     freq_alinhada = Counter(itertools.chain(*numeros_alinhados))
                     dezenas_elite = [dezena for dezena, freq in freq_alinhada.most_common(19)]
-                    
                     st.success(f"Universo de Elite com 19 dezenas encontrado: `{sorted(dezenas_elite)}`")
-
-                    # Gera 50 jogos a partir do universo de elite
                     combinacoes = list(itertools.combinations(dezenas_elite, 15))
-                    
-                    # Se houver muitas combinações, seleciona 50 aleatoriamente. Se não, usa todas.
                     if len(combinacoes) > 50:
                         jogos_finais = random.sample(combinacoes, 50)
                     else:
                         jogos_finais = combinacoes
-
                     st.subheader("50 Jogos Otimizados Sugeridos")
                     col1, col2, col3 = st.columns(3)
                     for i, jogo in enumerate(jogos_finais):
                         jogo_str = ", ".join(f"{num:02d}" for num in sorted(list(jogo)))
-                        colunas = [col1, col2, col3]
-                        colunas[i % 3].text(f"Jogo {i+1:03d}: [ {jogo_str} ]")
+                        colunas_jogos = [col1, col2, col3]
+                        colunas_jogos[i % 3].text(f"Jogo {i+1:03d}: [ {jogo_str} ]")
 
 else:
     st.warning("Aguardando o carregamento dos dados...")
