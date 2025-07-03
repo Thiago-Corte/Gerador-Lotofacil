@@ -17,7 +17,7 @@ PREMIOS_FIXOS = {11: 6.0, 12: 12.0, 13: 30.0}
 HEATMAP_COLORS_GREEN = ['#F7F7F7', '#D9F0D9', '#B8E5B8', '#98DB98', '#77D177', '#56C756', '#34BE34', '#11B411', '#00AA00', '#008B00']
 HEATMAP_COLORS_RED = ['#F7F7F7', '#FADBD8', '#F5B7B1', '#F0928A', '#EB6E62', '#E6473B', '#E02113', '#C7000E', '#B3000C', '#A2000A']
 
-# --- FUNÇÕES DE PROCESSAMENTO DE DADOS E ANÁLISE ---
+# --- FUNÇÕES DE PROCESSAMENTO DE DADOS ---
 @st.cache_data(ttl=3600)
 def carregar_dados_da_web():
     df_completo = None
@@ -27,7 +27,7 @@ def carregar_dados_da_web():
         df_hist.columns = ['Concurso', 'Data Sorteio', 'Bola1', 'Bola2', 'Bola3', 'Bola4', 'Bola5', 'Bola6', 'Bola7', 'Bola8', 'Bola9', 'Bola10', 'Bola11', 'Bola12', 'Bola13', 'Bola14', 'Bola15']
         df_completo = df_hist
     except FileNotFoundError:
-        st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado no seu repositório do GitHub.")
+        st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado no seu repositório do GitHub. A aplicação não pode funcionar sem ele. Por favor, faça o upload do arquivo.")
         return None
     try:
         url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
@@ -39,7 +39,7 @@ def carregar_dados_da_web():
         if not df_completo['Concurso'].isin([df_ultimo['Concurso'][0]]).any():
             df_completo = pd.concat([df_completo, df_ultimo], ignore_index=True)
     except Exception:
-        st.warning(f"Aviso: Não foi possível buscar o último resultado da API.")
+        st.warning(f"Aviso: Não foi possível buscar o último resultado da API da Caixa.")
     for col in df_completo.columns:
         if 'Bola' in col or 'Concurso' in col:
             df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
@@ -421,6 +421,5 @@ if df_resultados is not None and not df_resultados.empty:
         elif tipo_analise == "Atraso Atual":
             _, atraso_atual = analisar_frequencia_e_atraso(todos_os_sorteios)
             gerar_mapa_de_calor_plotly(atraso_atual, "Atraso (nº de concursos sem sair) de cada dezena", HEATMAP_COLORS_RED)
-
 else:
     st.warning("Aguardando o carregamento dos dados...")
