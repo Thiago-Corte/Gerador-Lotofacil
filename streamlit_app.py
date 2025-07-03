@@ -13,27 +13,37 @@ st.set_page_config(page_title="Analisador Lotofácil Pro", page_icon="🚀", lay
 @st.cache_data(ttl=3600) # Armazena o resultado por 1 hora
 def carregar_dados_da_web():
     """
-    Carrega os dados históricos da Lotofácil diretamente da API de serviço da Caixa.
+    Carrega os dados históricos da Lotofácil usando o arquivo local como base
+    e busca o último resultado na API da Caixa para complementar.
     """
+    df_completo = None
     try:
-        # Tenta a API mais recente primeiro
+        # Tenta carregar o arquivo Lotofácil.xlsx do próprio repositório do usuário
+        # Este arquivo DEVE existir no seu repositório.
+        df_hist = pd.read_excel("Lotofácil.xlsx")
+        
+        # Garante que só as colunas certas sejam lidas e nomeadas corretamente
+        df_hist = df_hist.iloc[:, :17]
+        df_hist.columns = ['Concurso', 'Data Sorteio', 'Bola1', 'Bola2', 'Bola3', 'Bola4', 'Bola5', 'Bola6', 'Bola7', 'Bola8', 'Bola9', 'Bola10', 'Bola11', 'Bola12', 'Bola13', 'Bola14', 'Bola15']
+        
+        df_completo = df_hist
+
+    except FileNotFoundError:
+        st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado no seu repositório do GitHub. Por favor, faça o upload do arquivo para que a aplicação funcione.")
+        return None
+    except Exception as e:
+        st.error(f"Ocorreu um erro ao ler o seu arquivo Excel. Verifique se o arquivo não está corrompido. Erro: {e}")
+        return None
+        
+    try:
+        # Após carregar o histórico, busca o resultado mais recente na API
         url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
         headers = {'User-Agent': 'Mozilla/5.0'}
-        # Adicionado verify=False para contornar problemas de certificado SSL em alguns ambientes
         response = requests.get(url, headers=headers, verify=False)
         response.raise_for_status()
         
         data = response.json()
         
-        # Carrega o histórico da planilha no repositório como base
-        # URL direta para o arquivo raw no GitHub
-        df_hist_url = "https://github.com/g-bolsoni/Lotofacil-Analysis/raw/main/Lotof%C3%A1cil.xlsx"
-        df_hist = pd.read_excel(df_hist_url)
-
-        # Garante que só as colunas certas sejam lidas e nomeadas corretamente
-        df_hist = df_hist.iloc[:, :17]
-        df_hist.columns = ['Concurso', 'Data Sorteio', 'Bola1', 'Bola2', 'Bola3', 'Bola4', 'Bola5', 'Bola6', 'Bola7', 'Bola8', 'Bola9', 'Bola10', 'Bola11', 'Bola12', 'Bola13', 'Bola14', 'Bola15']
-
         # Prepara o resultado mais recente da API
         ultimo_resultado = {
             'Concurso': data.get('numero'),
@@ -42,26 +52,20 @@ def carregar_dados_da_web():
         }
         df_ultimo = pd.DataFrame([ultimo_resultado])
         
-        # Combina o histórico com o último resultado, se ele não já estiver na lista
-        if not df_hist['Concurso'].isin([df_ultimo['Concurso'][0]]).any():
-            df_completo = pd.concat([df_hist, df_ultimo], ignore_index=True)
-        else:
-            df_completo = df_hist
-        
-        # Limpeza final para garantir consistência dos tipos de dados
-        for col in df_completo.columns:
-            if 'Bola' in col or 'Concurso' in col:
-                df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
-        
-        return df_completo.sort_values(by='Concurso').reset_index(drop=True)
+        # Combina o histórico com o último resultado, se ele ainda não estiver na lista
+        if not df_completo['Concurso'].isin([df_ultimo['Concurso'][0]]).any():
+            df_completo = pd.concat([df_completo, df_ultimo], ignore_index=True)
 
     except Exception as e:
-        st.error(f"Não foi possível carregar os dados da API da Caixa. Usando dados históricos da planilha como fallback.")
-        st.error(f"Detalhe do erro: {e}")
-        # Fallback para a planilha se a API falhar
-        df_hist_url = "https://github.com/g-bolsoni/Lotofacil-Analysis/raw/main/Lotof%C3%A1cil.xlsx"
-        df_hist = pd.read_excel(df_hist_url)
-        return df_hist
+        st.warning(f"Aviso: Não foi possível buscar o último resultado da API. Usando apenas os dados do seu arquivo Excel. Erro: {e}")
+
+    # Limpeza final para garantir consistência dos tipos de dados
+    for col in df_completo.columns:
+        if 'Bola' in col or 'Concurso' in col:
+            df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
+    
+    return df_completo.sort_values(by='Concurso').reset_index(drop=True)
+
 
 @st.cache_data
 def extrair_numeros(_df):
@@ -213,4 +217,4 @@ if df_resultados is not None and not df_resultados.empty:
                 st.error(f"Detalhe: {e}")
 
 else:
-    st.warning("Aguardando o carregamento dos dados... A API da Caixa pode estar temporariamente indisponível.")
+    st.warning("Aguardando o carregamento dos dados... A API da Caixa pode estar temporariamente indisponível ou o arquivo Excel não foi encontrado.")
