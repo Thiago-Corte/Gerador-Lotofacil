@@ -4,83 +4,102 @@ import itertools
 from collections import Counter
 
 # --- Configuração da Página ---
-st.set_page_config(page_title="Analisador Lotofácil", page_icon="🎲", layout="wide")
+st.set_page_config(page_title="Analisador Lotofácil Pro", page_icon="🚀", layout="wide")
 
-# --- Funções de Análise (com cache para performance) ---
+# --- FUNÇÕES DE PROCESSAMENTO DE DADOS ---
+
+@st.cache_data(ttl=3600) # Armazena o resultado por 1 hora (3600 segundos)
+def carregar_dados_da_web():
+    """
+    Carrega os dados históricos da Lotofácil diretamente do site da Caixa.
+    """
+    try:
+        url = "http://loterias.caixa.gov.br/wps/portal/loterias/landing/lotofacil/!ut/p/a1/04_Sj9CPykssy0xPLMnMz0vMAfGjzOLNDH0MPAzcDbwMPI0sDBxNXAOMwrzCjA0MDPSjPKwXK_WzdnQwszV3MPA0cDbwMPI0sDBxNXAOMwrzCjA0MDPSjPKwXK_WzdnQwszV3MPA0cDbwMPI0sDBxNXAOMwrzCjA0MDPSjPKwXK_WzdnQwszV3MPA0cDbwMPI0sDBxNXAOMwrzCjA0MDPSjPKwXK_WzdnQwszV3MDfDzyM_N2DN0VAQAV2_x0!/dl5/d5/L2dBISEvZ0FBIS9nQSEh/pw/Z7_61L0H0G0J0VSC0AC4B04I30000/res/id=historico_resultados/c=cacheLevelPage/=/?urile=wcm:path:/loterias/loterias/lotofacil/lotofacil_resultados.html"
+        # O pandas lê tabelas de HTML e retorna uma lista de DataFrames. A tabela que queremos é a primeira (índice 0).
+        dfs = pd.read_html(url, header=0)
+        df = dfs[0]
+
+        # --- Limpeza e Formatação dos Dados ---
+        # Remove colunas que não precisamos (Ganhadores, Rateio, etc.)
+        df.dropna(axis=1, how='all', inplace=True)
+        df.dropna(axis=0, how='any', inplace=True)
+        
+        # Mantém apenas as colunas de Concurso e as 15 bolas
+        colunas_bolas = [f'Bola {i}' for i in range(1, 16)]
+        df = df[['Concurso'] + colunas_bolas]
+
+        # Renomeia as colunas para o nosso padrão ('Bola1', 'Bola2', etc.)
+        novos_nomes = {'Concurso': 'Concurso'}
+        for i in range(1, 16):
+            novos_nomes[f'Bola {i}'] = f'Bola{i}'
+        df = df.rename(columns=novos_nomes)
+        
+        # Converte todas as colunas para números inteiros
+        for col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        df = df.dropna().astype(int)
+        
+        return df.sort_values(by='Concurso').reset_index(drop=True)
+
+    except Exception as e:
+        st.error(f"Não foi possível carregar os dados da Caixa. O site pode estar fora do ar ou o formato da tabela mudou.")
+        st.error(f"Detalhe do erro: {e}")
+        return None
 
 @st.cache_data
-def extrair_numeros(df):
+def extrair_numeros(_df):
     """Extrai todos os números sorteados para uma lista de listas."""
     numeros_cols = [f'Bola{i}' for i in range(1, 16)]
-    # Garante que todas as colunas de bolas sejam convertidas para um tipo numérico, tratando erros
-    for col in numeros_cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-    # Remove linhas que possam ter ficado com valores nulos após a conversão
-    df.dropna(subset=numeros_cols, inplace=True)
-    df[numeros_cols] = df[numeros_cols].astype(int)
-    return df[numeros_cols].values.tolist()
+    return _df[numeros_cols].values.tolist()
 
 @st.cache_data
-def analisar_frequencia_e_atraso(numeros_sorteados):
-    """Calcula a frequência e o atraso de cada dezena."""
-    frequencia = Counter(itertools.chain(*numeros_sorteados))
-    
+def analisar_frequencia_e_atraso(_numeros_sorteados):
+    frequencia = Counter(itertools.chain(*_numeros_sorteados))
     atraso = {}
-    total_concursos = len(numeros_sorteados)
+    total_concursos = len(_numeros_sorteados)
     for dezena in range(1, 26):
         try:
-            # Encontra o índice do último concurso em que a dezena apareceu
-            ultimo_sorteio_idx = max(i for i, sorteio in enumerate(numeros_sorteados) if dezena in sorteio)
+            ultimo_sorteio_idx = max(i for i, sorteio in enumerate(_numeros_sorteados) if dezena in sorteio)
             atraso[dezena] = total_concursos - 1 - ultimo_sorteio_idx
         except ValueError:
-            atraso[dezena] = total_concursos  # Se nunca foi sorteada
-            
+            atraso[dezena] = total_concursos
     return frequencia, atraso
 
 @st.cache_data
-def encontrar_combinacoes_frequentes(numeros_sorteados, tamanho):
-    """Encontra os pares (tamanho=2) ou trios (tamanho=3) mais frequentes."""
-    todas_as_combinacoes = itertools.chain.from_iterable(
-        itertools.combinations(sorteio, tamanho) for sorteio in numeros_sorteados
-    )
+def encontrar_combinacoes_frequentes(_numeros_sorteados, tamanho):
+    todas_as_combinacoes = itertools.chain.from_iterable(itertools.combinations(sorteio, tamanho) for sorteio in _numeros_sorteados)
     return Counter(todas_as_combinacoes).most_common(15)
 
-# --- Título Principal ---
-st.title("🎲 Analisador e Gerador Inteligente da Lotofácil")
-st.write(f"Análise atualizada até a data de hoje: **{pd.Timestamp.now(tz='America/Sao_Paulo').strftime('%d/%m/%Y')}**")
+# --- INÍCIO DA APLICAÇÃO ---
 
-# --- Interface Principal ---
-st.sidebar.header("1. Carregue sua Planilha")
-uploaded_file = st.sidebar.file_uploader("Escolha o seu arquivo Lotofácil.xlsx", type="xlsx")
+st.title("🚀 Analisador Lotofácil Pro")
+df_resultados = carregar_dados_da_web()
 
-if uploaded_file is None:
-    st.info("⬅️ **Comece fazendo o upload da sua planilha na barra lateral para carregar os dados.**")
-    st.image("https://i.imgur.com/gKUK44F.png", caption="Exemplo de análise que será gerada.")
-else:
-    df_resultados = pd.read_excel(uploaded_file)
+if df_resultados is not None:
     todos_os_sorteios = extrair_numeros(df_resultados)
+    ultimo_concurso_num = int(df_resultados.iloc[-1]['Concurso'])
     
-    # --- Cria as Abas ---
+    st.success(f"**Dados carregados com sucesso!** Último concurso na base: **{ultimo_concurso_num}**.")
+    
     tab1, tab2 = st.tabs(["🎯 Gerador de Jogos", "📊 Análise de Tendências"])
 
     # --- Aba 1: Gerador de Jogos ---
     with tab1:
         st.header("Gerador de Jogos com Filtros Estratégicos")
         
-        st.sidebar.header("2. Defina sua Estratégia de Geração")
+        st.sidebar.header("Defina sua Estratégia de Geração")
         dezenas_str = st.sidebar.text_area("Seu universo de dezenas (separadas por vírgula):", "1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 14, 17, 19, 20, 21, 22, 24, 25", height=150)
         
         st.sidebar.subheader("Filtros:")
         min_rep, max_rep = st.sidebar.slider("Quantidade de Dezenas Repetidas (do último concurso):", 0, 15, (8, 10))
         min_imp, max_imp = st.sidebar.slider("Quantidade de Dezenas Ímpares:", 0, 15, (7, 9))
         
-        # Lógica do Gerador
         try:
             dezenas_escolhidas = sorted(list(set([int(num.strip()) for num in dezenas_str.split(',')])))
             st.write(f"**Universo de {len(dezenas_escolhidas)} dezenas escolhido:** `{dezenas_escolhidas}`")
 
             ultimo_concurso_numeros = set(todos_os_sorteios[-1])
-            st.info(f"Analisando com base no Concurso **{int(df_resultados.iloc[-1]['Concurso'])}** de dezenas: `{sorted(list(ultimo_concurso_numeros))}`")
+            st.info(f"Analisando com base no Concurso **{ultimo_concurso_num}** de dezenas: `{sorted(list(ultimo_concurso_numeros))}`")
             
             if st.button("Gerar Jogos 🚀", type="primary"):
                 if len(dezenas_escolhidas) < 15:
@@ -97,7 +116,6 @@ else:
                     st.success(f"De **{len(combinacoes)}** jogos possíveis, **{len(jogos_filtrados)}** foram selecionados após os filtros.")
                     if jogos_filtrados:
                         st.write("---")
-                        # AQUI ESTÁ A CORREÇÃO: Definindo as colunas e a variável 'colunas'
                         col1, col2, col3 = st.columns(3)
                         colunas = [col1, col2, col3]
                         for i, jogo in enumerate(jogos_filtrados):
@@ -109,25 +127,21 @@ else:
     # --- Aba 2: Análise de Tendências ---
     with tab2:
         st.header("Painel de Análise de Tendências Históricas")
-        st.write("Análises baseadas em todos os concursos da planilha carregada.")
+        st.write(f"Análises baseadas em todos os {ultimo_concurso_num} concursos.")
 
-        # Executa as análises
         frequencia, atraso = analisar_frequencia_e_atraso(todos_os_sorteios)
-        pares_frequentes = encontrar_combinacoes_frequentes(todos_os_sorteios, 2)
-        trios_frequentes = encontrar_combinacoes_frequentes(todos_os_sorteios, 3)
-
-        # Prepara dados para exibição
+        
         df_freq = pd.DataFrame(frequencia.most_common(25), columns=['Dezena', 'Frequência']).set_index('Dezena')
         df_atraso = pd.DataFrame(atraso.items(), columns=['Dezena', 'Atraso (concursos)']).sort_values(by='Atraso (concursos)', ascending=False).set_index('Dezena')
 
-        # Exibição das análises
         col1, col2 = st.columns(2)
         
         with col1:
             st.subheader("🌡️ Dezenas Quentes e Frias")
             st.bar_chart(df_freq)
 
-            st.subheader("✨ Pares de Ouro")
+            st.subheader("✨ Pares de Ouro (Top 15)")
+            pares_frequentes = encontrar_combinacoes_frequentes(todos_os_sorteios, 2)
             df_pares = pd.DataFrame(pares_frequentes, columns=['Par', 'Vezes'])
             st.dataframe(df_pares, use_container_width=True)
         
@@ -135,6 +149,7 @@ else:
             st.subheader("⏳ Dezenas Atrasadas")
             st.dataframe(df_atraso, use_container_width=True)
 
-            st.subheader("💎 Trios de Diamante")
+            st.subheader("💎 Trios de Diamante (Top 15)")
+            trios_frequentes = encontrar_combinacoes_frequentes(todos_os_sorteios, 3)
             df_trios = pd.DataFrame(trios_frequentes, columns=['Trio', 'Vezes'])
             st.dataframe(df_trios, use_container_width=True)
