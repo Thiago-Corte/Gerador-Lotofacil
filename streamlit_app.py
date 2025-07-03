@@ -18,25 +18,16 @@ def carregar_dados_da_web():
     """
     df_completo = None
     try:
-        # Tenta carregar o arquivo Lotofácil.xlsx do próprio repositório do usuário
-        # Este arquivo DEVE existir no seu repositório.
         df_hist = pd.read_excel("Lotofácil.xlsx")
-        
-        # Garante que só as colunas certas sejam lidas e nomeadas corretamente
         df_hist = df_hist.iloc[:, :17]
         df_hist.columns = ['Concurso', 'Data Sorteio', 'Bola1', 'Bola2', 'Bola3', 'Bola4', 'Bola5', 'Bola6', 'Bola7', 'Bola8', 'Bola9', 'Bola10', 'Bola11', 'Bola12', 'Bola13', 'Bola14', 'Bola15']
-        
         df_completo = df_hist
 
     except FileNotFoundError:
         st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado no seu repositório do GitHub. Por favor, faça o upload do arquivo para que a aplicação funcione.")
         return None
-    except Exception as e:
-        st.error(f"Ocorreu um erro ao ler o seu arquivo Excel. Verifique se o arquivo não está corrompido. Erro: {e}")
-        return None
         
     try:
-        # Após carregar o histórico, busca o resultado mais recente na API
         url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, verify=False)
@@ -44,28 +35,23 @@ def carregar_dados_da_web():
         
         data = response.json()
         
-        # Prepara o resultado mais recente da API
         ultimo_resultado = {
-            'Concurso': data.get('numero'),
-            'Data Sorteio': data.get('dataApuracao'),
+            'Concurso': data.get('numero'), 'Data Sorteio': data.get('dataApuracao'),
             **{f'Bola{i+1}': int(dezena) for i, dezena in enumerate(data.get('listaDezenas', []))}
         }
         df_ultimo = pd.DataFrame([ultimo_resultado])
         
-        # Combina o histórico com o último resultado, se ele ainda não estiver na lista
         if not df_completo['Concurso'].isin([df_ultimo['Concurso'][0]]).any():
             df_completo = pd.concat([df_completo, df_ultimo], ignore_index=True)
 
     except Exception as e:
         st.warning(f"Aviso: Não foi possível buscar o último resultado da API. Usando apenas os dados do seu arquivo Excel. Erro: {e}")
 
-    # Limpeza final para garantir consistência dos tipos de dados
     for col in df_completo.columns:
         if 'Bola' in col or 'Concurso' in col:
             df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
     
     return df_completo.sort_values(by='Concurso').reset_index(drop=True)
-
 
 @st.cache_data
 def extrair_numeros(_df):
@@ -90,10 +76,48 @@ def encontrar_combinacoes_frequentes(_numeros_sorteados, tamanho):
     todas_as_combinacoes = itertools.chain.from_iterable(itertools.combinations(sorteio, tamanho) for sorteio in _numeros_sorteados)
     return Counter(todas_as_combinacoes).most_common(15)
 
+# --- NOVA FUNÇÃO: MOTOR DE SUGESTÃO ---
+@st.cache_data
+def sugerir_universo_estrategico(_df, num_sorteios=1000, tamanho_universo=19):
+    """
+    Analisa os últimos 1000 jogos e sugere um universo de 19 dezenas
+    combinando frequência e atraso.
+    """
+    df_recente = _df.tail(num_sorteios)
+    numeros_recentes = extrair_numeros(df_recente)
+    
+    # Análise de Frequência e Atraso no período
+    frequencia, atraso = analisar_frequencia_e_atraso(numeros_recentes)
+    
+    scores = {}
+    max_freq = max(frequencia.values())
+    max_atraso = max(atraso.values())
+
+    for dezena in range(1, 26):
+        # Score de Frequência (normalizado)
+        score_freq = frequencia.get(dezena, 0) / max_freq
+        
+        # Score de Atraso (normalizado)
+        score_atraso = atraso.get(dezena, 0) / max_atraso
+        
+        # Score Combinado (50% Frequência, 50% Atraso)
+        scores[dezena] = (0.5 * score_freq) + (0.5 * score_atraso)
+        
+    # Ordena as dezenas pelo score e retorna as melhores
+    dezenas_ordenadas = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    
+    universo_sugerido = [dezena for dezena, score in dezenas_ordenadas[:tamanho_universo]]
+    return sorted(universo_sugerido)
+
+
 # --- INÍCIO DA APLICAÇÃO ---
 
 st.title("🚀 Analisador Lotofácil Pro")
 df_resultados = carregar_dados_da_web()
+
+# Inicializa o session_state para guardar as dezenas sugeridas
+if 'sugeridas' not in st.session_state:
+    st.session_state.sugeridas = ""
 
 if df_resultados is not None and not df_resultados.empty:
     todos_os_sorteios = extrair_numeros(df_resultados)
@@ -106,14 +130,24 @@ if df_resultados is not None and not df_resultados.empty:
     # --- Aba 1: Gerador de Jogos ---
     with tab1:
         st.header("Gerador de Jogos com Filtros Estratégicos")
+        
         st.sidebar.header("Defina sua Estratégia de Geração")
-        dezenas_str = st.sidebar.text_area("Seu universo de dezenas (separadas por vírgula):", "1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 14, 17, 19, 20, 21, 22, 24, 25", height=150)
+        
+        # --- NOVO BLOCO: MOTOR DE SUGESTÃO ---
+        st.sidebar.subheader("✨ Sugestão Inteligente")
+        if st.sidebar.button("Sugerir Universo (Análise de 1000 Sorteios)"):
+            with st.spinner("Analisando 1000 sorteios... Isso pode levar um momento."):
+                universo = sugerir_universo_estrategico(df_resultados)
+                st.session_state.sugeridas = ", ".join(map(str, universo))
+        # --- FIM DO NOVO BLOCO ---
+        
+        dezenas_str = st.sidebar.text_area("Seu universo de dezenas (separadas por vírgula):", value=st.session_state.sugeridas, height=150)
         st.sidebar.subheader("Filtros:")
         min_rep, max_rep = st.sidebar.slider("Quantidade de Dezenas Repetidas (do último concurso):", 0, 15, (8, 10), key='slider_rep')
         min_imp, max_imp = st.sidebar.slider("Quantidade de Dezenas Ímpares:", 0, 15, (7, 9), key='slider_imp')
         
         try:
-            dezenas_escolhidas = sorted(list(set([int(num.strip()) for num in dezenas_str.split(',')])))
+            dezenas_escolhidas = sorted(list(set([int(num.strip()) for num in dezenas_str.split(',') if num.strip()])))
             st.write(f"**Universo de {len(dezenas_escolhidas)} dezenas escolhido:** `{dezenas_escolhidas}`")
             ultimo_concurso_numeros = set(todos_os_sorteios[-1])
             st.info(f"Analisando com base no Concurso **{ultimo_concurso_num}** de dezenas: `{sorted(list(ultimo_concurso_numeros))}`")
@@ -131,10 +165,12 @@ if df_resultados is not None and not df_resultados.empty:
                     st.success(f"De **{len(combinacoes)}** jogos possíveis, **{len(jogos_filtrados)}** foram selecionados após os filtros.")
                     if jogos_filtrados:
                         st.write("---")
+                        if len(jogos_filtrados) > 20:
+                             st.info(f"Mostrando os primeiros 20 jogos de {len(jogos_filtrados)} gerados.")
                         col1, col2, col3 = st.columns(3)
-                        colunas = [col1, col2, col3]
-                        for i, jogo in enumerate(jogos_filtrados):
+                        for i, jogo in enumerate(jogos_filtrados[:20]): # Mostra no máximo 20 jogos
                             jogo_str = ", ".join(f"{num:02d}" for num in jogo)
+                            colunas = [col1, col2, col3]
                             colunas[i % 3].text(f"Jogo {i+1:03d}: [ {jogo_str} ]")
         except Exception as e:
             st.error(f"Ocorreu um erro ao gerar os jogos. Verifique se as dezenas foram inseridas corretamente. Detalhe: {e}")
@@ -174,12 +210,10 @@ if df_resultados is not None and not df_resultados.empty:
         
         if st.button("Conferir Meus Jogos", type="primary"):
             try:
-                # Processa o resultado do sorteio
                 resultado_set = set([int(num.strip()) for num in resultado_str.split(',') if num.strip().isdigit()])
                 if len(resultado_set) != 15:
                     st.error("Erro: O resultado do sorteio deve conter exatamente 15 números válidos.")
                 else:
-                    # Processa os jogos a serem conferidos
                     linhas = jogos_para_conferir.strip().split('\n')
                     jogos = [set([int(num.strip()) for num in linha.split(',') if num.strip().isdigit()]) for linha in linhas if linha]
                     
@@ -188,22 +222,17 @@ if df_resultados is not None and not df_resultados.empty:
                     else:
                         st.write("---")
                         st.subheader("Resultado da Conferência")
-                        
                         resultados_conferencia = []
                         premios = Counter()
-                        
                         for i, jogo_set in enumerate(jogos):
-                            if len(jogo_set) > 0: # Garante que a linha não estava vazia ou com dados inválidos
+                            if len(jogo_set) > 0:
                                 acertos = len(jogo_set.intersection(resultado_set))
                                 jogo_formatado = ", ".join(map(str, sorted(list(jogo_set))))
                                 resultados_conferencia.append({'Jogo': jogo_formatado, 'Acertos': acertos})
-                                
                                 if acertos >= 11:
                                     premios[acertos] += 1
-
                         df_conferencia = pd.DataFrame(resultados_conferencia)
                         st.dataframe(df_conferencia, use_container_width=True)
-                        
                         st.write("---")
                         st.subheader("Resumo de Prêmios")
                         if sum(premios.values()) > 0:
@@ -211,10 +240,8 @@ if df_resultados is not None and not df_resultados.empty:
                                 st.success(f"Você teve **{qtd}** jogo(s) com **{acertos}** acertos!")
                         else:
                             st.info("Nenhum jogo premiado (11 ou mais acertos).")
-
             except Exception as e:
-                st.error(f"Ocorreu um erro ao conferir os jogos. Verifique se os números foram digitados corretamente.")
-                st.error(f"Detalhe: {e}")
+                st.error(f"Ocorreu um erro ao conferir os jogos. Verifique se os números foram digitados corretamente. Detalhe: {e}")
 
 else:
-    st.warning("Aguardando o carregamento dos dados... A API da Caixa pode estar temporariamente indisponível ou o arquivo Excel não foi encontrado.")
+    st.warning("Aguardando o carregamento dos dados... A API da Caixa pode estar temporariamente indisponível ou o arquivo Excel não foi encontrado no repositório.")
