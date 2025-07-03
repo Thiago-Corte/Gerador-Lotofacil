@@ -19,13 +19,18 @@ def carregar_dados_da_web():
         # Tenta a API mais recente primeiro
         url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
         headers = {'User-Agent': 'Mozilla/5.0'}
+        # Adicionado verify=False para contornar problemas de certificado SSL em alguns ambientes
         response = requests.get(url, headers=headers, verify=False)
         response.raise_for_status()
         
         data = response.json()
         
         # Carrega o histórico da planilha no repositório como base
-        df_hist = pd.read_excel("https://github.com/g-bolsoni/Lotofacil-Analysis/raw/main/Lotof%C3%A1cil.xlsx")
+        # URL direta para o arquivo raw no GitHub
+        df_hist_url = "https://github.com/g-bolsoni/Lotofacil-Analysis/raw/main/Lotof%C3%A1cil.xlsx"
+        df_hist = pd.read_excel(df_hist_url)
+
+        # Garante que só as colunas certas sejam lidas e nomeadas corretamente
         df_hist = df_hist.iloc[:, :17]
         df_hist.columns = ['Concurso', 'Data Sorteio', 'Bola1', 'Bola2', 'Bola3', 'Bola4', 'Bola5', 'Bola6', 'Bola7', 'Bola8', 'Bola9', 'Bola10', 'Bola11', 'Bola12', 'Bola13', 'Bola14', 'Bola15']
 
@@ -43,6 +48,7 @@ def carregar_dados_da_web():
         else:
             df_completo = df_hist
         
+        # Limpeza final para garantir consistência dos tipos de dados
         for col in df_completo.columns:
             if 'Bola' in col or 'Concurso' in col:
                 df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
@@ -50,12 +56,12 @@ def carregar_dados_da_web():
         return df_completo.sort_values(by='Concurso').reset_index(drop=True)
 
     except Exception as e:
-        st.error(f"Não foi possível carregar os dados da API da Caixa. Usando dados históricos da planilha.")
+        st.error(f"Não foi possível carregar os dados da API da Caixa. Usando dados históricos da planilha como fallback.")
         st.error(f"Detalhe do erro: {e}")
         # Fallback para a planilha se a API falhar
-        df_hist = pd.read_excel("https://github.com/g-bolsoni/Lotofacil-Analysis/raw/main/Lotof%C3%A1cil.xlsx")
+        df_hist_url = "https://github.com/g-bolsoni/Lotofacil-Analysis/raw/main/Lotof%C3%A1cil.xlsx"
+        df_hist = pd.read_excel(df_hist_url)
         return df_hist
-
 
 @st.cache_data
 def extrair_numeros(_df):
@@ -108,7 +114,6 @@ if df_resultados is not None and not df_resultados.empty:
             ultimo_concurso_numeros = set(todos_os_sorteios[-1])
             st.info(f"Analisando com base no Concurso **{ultimo_concurso_num}** de dezenas: `{sorted(list(ultimo_concurso_numeros))}`")
             if st.button("Gerar Jogos 🚀", type="primary"):
-                # Lógica de geração de jogos...
                 if len(dezenas_escolhidas) < 15:
                      st.error("Erro: Você precisa escolher pelo menos 15 dezenas.")
                 else:
@@ -123,9 +128,9 @@ if df_resultados is not None and not df_resultados.empty:
                     if jogos_filtrados:
                         st.write("---")
                         col1, col2, col3 = st.columns(3)
+                        colunas = [col1, col2, col3]
                         for i, jogo in enumerate(jogos_filtrados):
                             jogo_str = ", ".join(f"{num:02d}" for num in jogo)
-                            colunas = [col1, col2, col3]
                             colunas[i % 3].text(f"Jogo {i+1:03d}: [ {jogo_str} ]")
         except Exception as e:
             st.error(f"Ocorreu um erro ao gerar os jogos. Verifique se as dezenas foram inseridas corretamente. Detalhe: {e}")
@@ -166,13 +171,13 @@ if df_resultados is not None and not df_resultados.empty:
         if st.button("Conferir Meus Jogos", type="primary"):
             try:
                 # Processa o resultado do sorteio
-                resultado_set = set([int(num.strip()) for num in resultado_str.split(',')])
+                resultado_set = set([int(num.strip()) for num in resultado_str.split(',') if num.strip().isdigit()])
                 if len(resultado_set) != 15:
-                    st.error("Erro: O resultado do sorteio deve conter exatamente 15 números.")
+                    st.error("Erro: O resultado do sorteio deve conter exatamente 15 números válidos.")
                 else:
                     # Processa os jogos a serem conferidos
                     linhas = jogos_para_conferir.strip().split('\n')
-                    jogos = [set([int(num.strip()) for num in linha.split(',')]) for linha in linhas if linha]
+                    jogos = [set([int(num.strip()) for num in linha.split(',') if num.strip().isdigit()]) for linha in linhas if linha]
                     
                     if not jogos:
                         st.warning("Nenhum jogo para conferir. Por favor, cole seus jogos na área de texto.")
@@ -184,12 +189,13 @@ if df_resultados is not None and not df_resultados.empty:
                         premios = Counter()
                         
                         for i, jogo_set in enumerate(jogos):
-                            acertos = len(jogo_set.intersection(resultado_set))
-                            jogo_formatado = ", ".join(map(str, sorted(list(jogo_set))))
-                            resultados_conferencia.append({'Jogo': jogo_formatado, 'Acertos': acertos})
-                            
-                            if acertos >= 11:
-                                premios[acertos] += 1
+                            if len(jogo_set) > 0: # Garante que a linha não estava vazia ou com dados inválidos
+                                acertos = len(jogo_set.intersection(resultado_set))
+                                jogo_formatado = ", ".join(map(str, sorted(list(jogo_set))))
+                                resultados_conferencia.append({'Jogo': jogo_formatado, 'Acertos': acertos})
+                                
+                                if acertos >= 11:
+                                    premios[acertos] += 1
 
                         df_conferencia = pd.DataFrame(resultados_conferencia)
                         st.dataframe(df_conferencia, use_container_width=True)
@@ -207,4 +213,4 @@ if df_resultados is not None and not df_resultados.empty:
                 st.error(f"Detalhe: {e}")
 
 else:
-    st.warning("Aguardando o carregamento dos dados... A API da Caixa pode estar demorando ou temporariamente indisponível.")
+    st.warning("Aguardando o carregamento dos dados... A API da Caixa pode estar temporariamente indisponível.")
