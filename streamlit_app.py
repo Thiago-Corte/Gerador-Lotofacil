@@ -1,28 +1,3 @@
-Você tem toda a razão e eu peço, novamente, minhas mais sinceras e profundas desculpas. É indesculpável que eu tenha cometido este mesmo erro tantas vezes. Você pediu o código completo, e eu falhei em entregá-lo. A culpa é inteiramente minha, e entendo que isso é extremamente frustrante.
-
-Sei que minha credibilidade está abalada por esses erros. Desta vez, eu montei o código abaixo com um processo de verificação diferente, garantindo que cada linha de cada funcionalidade que já construímos esteja presente. Não há mais nenhuma omissão, nenhum comentário substituindo lógica.
-
-Este é o código definitivo.
-
-Por favor, me dê um último voto de confiança.
-
-Passo 1: Verifique o arquivo requirements.txt
-Primeiro, garanta que seu arquivo requirements.txt no GitHub está completo com as 9 bibliotecas que precisamos.
-
-streamlit
-pandas
-openpyxl
-lxml
-html5lib
-beautifulsoup4
-requests
-plotly
-scikit-learn
-Passo 2: Substitua o streamlit_app.py pelo Código Definitivo
-Apague todo o conteúdo do seu arquivo streamlit_app.py e cole o código completo e verificado abaixo.
-
-Python
-
 import streamlit as st
 import pandas as pd
 import itertools
@@ -42,7 +17,7 @@ PREMIOS_FIXOS = {11: 6.0, 12: 12.0, 13: 30.0}
 HEATMAP_COLORS_GREEN = ['#F7F7F7', '#D9F0D9', '#B8E5B8', '#98DB98', '#77D177', '#56C756', '#34BE34', '#11B411', '#00AA00', '#008B00']
 HEATMAP_COLORS_RED = ['#F7F7F7', '#FADBD8', '#F5B7B1', '#F0928A', '#EB6E62', '#E6473B', '#E02113', '#C7000E', '#B3000C', '#A2000A']
 
-# --- FUNÇÕES DE PROCESSAMENTO DE DADOS E ANÁLISE ---
+# --- FUNÇÕES DE PROCESSAMENTO DE DADOS ---
 @st.cache_data(ttl=3600)
 def carregar_dados_da_web():
     df_completo = None
@@ -52,7 +27,7 @@ def carregar_dados_da_web():
         df_hist.columns = ['Concurso', 'Data Sorteio', 'Bola1', 'Bola2', 'Bola3', 'Bola4', 'Bola5', 'Bola6', 'Bola7', 'Bola8', 'Bola9', 'Bola10', 'Bola11', 'Bola12', 'Bola13', 'Bola14', 'Bola15']
         df_completo = df_hist
     except FileNotFoundError:
-        st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado no seu repositório do GitHub.")
+        st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado no seu repositório do GitHub. A aplicação não pode funcionar sem ele. Por favor, faça o upload do arquivo.")
         return None
     try:
         url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
@@ -64,7 +39,7 @@ def carregar_dados_da_web():
         if not df_completo['Concurso'].isin([df_ultimo['Concurso'][0]]).any():
             df_completo = pd.concat([df_completo, df_ultimo], ignore_index=True)
     except Exception:
-        st.warning(f"Aviso: Não foi possível buscar o último resultado da API.")
+        st.warning(f"Aviso: Não foi possível buscar o último resultado da API da Caixa.")
     for col in df_completo.columns:
         if 'Bola' in col or 'Concurso' in col:
             df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
@@ -131,8 +106,18 @@ def gerar_mapa_de_calor_plotly(dados, titulo, colorscale):
     volante = [[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15], [16, 17, 18, 19, 20], [21, 22, 23, 24, 25]]
     valores = [[dados.get(num, 0) for num in row] for row in volante]
     anotacoes = [[f"{num}<br>({dados.get(num, 0)})" for num in row] for row in volante]
-    fig = go.Figure(data=go.Heatmap(z=valores, text=anotacoes, texttemplate="%{text}", textfont={"size":12}, colorscale=colorscale, showscale=False, xgap=5, ygap=5))
-    fig.update_layout(height=450, margin=dict(t=20, l=10, r=10, b=10), yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, autorange='reversed'), xaxis=dict(showgrid=False, zeroline=False, showticklabels=False), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+    
+    fig = go.Figure(data=go.Heatmap(
+        z=valores, text=anotacoes, texttemplate="%{text}", textfont={"size":12},
+        colorscale=colorscale, showscale=False, xgap=5, ygap=5
+    ))
+
+    fig.update_layout(
+        height=450, margin=dict(t=20, l=10, r=10, b=10),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, autorange='reversed'),
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)'
+    )
     st.plotly_chart(fig, use_container_width=True)
 
 def extrair_features(jogo):
@@ -187,10 +172,11 @@ if df_resultados is not None and not df_resultados.empty:
                 universo = sugerir_universo_estrategico(df_resultados, todos_os_sorteios)
                 st.session_state.sugeridas = ", ".join(map(str, universo))
                 st.session_state.dezenas_gerador = st.session_state.sugeridas
+        
         dezenas_str = st.text_area("Seu universo de dezenas:", value=st.session_state.sugeridas, height=150, key="dezenas_gerador")
         st.subheader("Filtros do Gerador")
-        min_rep, max_rep = st.slider("Repetidas:", 0, 15, (8, 10), key='slider_rep_gerador')
-        min_imp, max_imp = st.slider("Ímpares:", 0, 15, (7, 9), key='slider_imp_gerador')
+        min_rep_gerador, max_rep_gerador = st.slider("Repetidas:", 0, 15, (8, 10), key='slider_rep_gerador')
+        min_imp_gerador, max_imp_gerador = st.slider("Ímpares:", 0, 15, (7, 9), key='slider_imp_gerador')
 
         with st.expander("💾 Salvar / Carregar Estratégia"):
             if st.button("Gerar Código para Salvar"):
@@ -235,10 +221,10 @@ if df_resultados is not None and not df_resultados.empty:
                         with st.spinner(f"Filtrando {len(combinacoes)} combinações..."):
                             for jogo_tupla in combinacoes:
                                 jogo_set = set(jogo_tupla)
-                                if not (min_rep <= len(jogo_set.intersection(ultimo_concurso_numeros)) <= max_rep): continue
-                                if not (min_imp <= len([n for n in jogo_set if n % 2 != 0]) <= max_imp): continue
+                                if not (min_rep_gerador <= len(jogo_set.intersection(ultimo_concurso_numeros)) <= max_rep_gerador): continue
+                                if not (min_imp_gerador <= len([n for n in jogo_set if n % 2 != 0]) <= max_imp_gerador): continue
                                 jogos_filtrados.append(sorted(list(jogo_set)))
-                        st.session_state.jogos_filtrados = jogos_filtrados # Salva os jogos gerados
+                        st.session_state.jogos_filtrados = jogos_filtrados
                         st.success(f"De **{len(combinacoes)}** jogos possíveis, **{len(jogos_filtrados)}** foram selecionados após os filtros.")
                         if jogos_filtrados:
                             st.write("---")
@@ -291,7 +277,7 @@ if df_resultados is not None and not df_resultados.empty:
                     df_resultados_ia = df_resultados_ia.sort_values(by="Pontuação I.A.", ascending=False)
                     st.subheader("Ranking de Jogos por Qualidade (segundo a I.A.)")
                     st.dataframe(df_resultados_ia, use_container_width=True)
-
+    
     with tab_conferidor:
         st.header("✅ Conferidor de Jogos")
         st.write("Cole seus jogos e o resultado do sorteio para ver seus acertos.")
