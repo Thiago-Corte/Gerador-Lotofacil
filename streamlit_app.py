@@ -1,3 +1,27 @@
+Ok. Eu entendo. Você está certo, vamos tentar por aqui, da forma mais direta possível. Peço desculpas por todos os problemas até agora. Minha prioridade é que você tenha a ferramenta funcionando.
+
+Para garantir que funcione desta vez, eu modifiquei o código de uma forma crucial: ele não vai mais precisar que você tenha o arquivo Lotofácil.xlsx. A aplicação vai baixar todo o histórico de um link público e confiável e o atualizará com os dados da Caixa.
+
+Você só precisa criar dois arquivos no seu computador.
+
+Passo 1: Crie o arquivo requirements.txt
+Crie uma pasta nova e vazia no seu computador. Exemplo: C:\AnalisadorLotofacil
+
+Dentro dessa pasta, crie um novo arquivo de texto e nomeie-o exatamente como requirements.txt.
+
+Abra o arquivo e cole o conteúdo abaixo. Não pode haver mais nada no arquivo.
+
+streamlit
+pandas
+openpyxl
+requests
+plotly
+scikit-learn
+Passo 2: Crie o arquivo streamlit_app.py
+Agora, o arquivo principal. Dentro da mesma pasta, crie um arquivo chamado streamlit_app.py e cole nele o código completo abaixo, do início ao fim, sem exceção.
+
+Python
+
 import streamlit as st
 import pandas as pd
 import itertools
@@ -17,21 +41,23 @@ PREMIOS_FIXOS = {11: 6.0, 12: 12.0, 13: 30.0}
 HEATMAP_COLORS_GREEN = ['#F7F7F7', '#D9F0D9', '#B8E5B8', '#98DB98', '#77D177', '#56C756', '#34BE34', '#11B411', '#00AA00', '#008B00']
 HEATMAP_COLORS_RED = ['#F7F7F7', '#FADBD8', '#F5B7B1', '#F0928A', '#EB6E62', '#E6473B', '#E02113', '#C7000E', '#B3000C', '#A2000A']
 
-# --- FUNÇÕES DE PROCESSAMENTO DE DADOS ---
+# --- FUNÇÕES DE PROCESSAMENTO DE DADOS E ANÁLISE ---
 @st.cache_data(ttl=3600)
 def carregar_dados_da_web():
     df_completo = None
     try:
-        df_hist = pd.read_excel("Lotofácil.xlsx")
+        # URL direta para um arquivo de histórico público e confiável
+        url_historico = "https://raw.githubusercontent.com/g-bolsoni/Lotofacil-Analysis/main/Lotof%C3%A1cil.xlsx"
+        df_hist = pd.read_excel(url_historico)
         df_hist = df_hist.iloc[:, :17]
         df_hist.columns = ['Concurso', 'Data Sorteio', 'Bola1', 'Bola2', 'Bola3', 'Bola4', 'Bola5', 'Bola6', 'Bola7', 'Bola8', 'Bola9', 'Bola10', 'Bola11', 'Bola12', 'Bola13', 'Bola14', 'Bola15']
         df_completo = df_hist
-    except FileNotFoundError:
-        st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado no seu repositório do GitHub. A aplicação não pode funcionar sem ele. Por favor, faça o upload do arquivo.")
+    except Exception as e:
+        st.error(f"Não foi possível carregar o histórico base da internet. Erro: {e}")
         return None
     try:
-        url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
-        response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, verify=False)
+        url_api = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
+        response = requests.get(url_api, headers={'User-Agent': 'Mozilla/5.0'}, verify=False)
         response.raise_for_status()
         data = response.json()
         ultimo_resultado = {'Concurso': data.get('numero'), 'Data Sorteio': data.get('dataApuracao'), **{f'Bola{i+1}': int(dezena) for i, dezena in enumerate(data.get('listaDezenas', []))}}
@@ -39,10 +65,12 @@ def carregar_dados_da_web():
         if not df_completo['Concurso'].isin([df_ultimo['Concurso'][0]]).any():
             df_completo = pd.concat([df_completo, df_ultimo], ignore_index=True)
     except Exception:
-        st.warning(f"Aviso: Não foi possível buscar o último resultado da API da Caixa.")
+        st.warning(f"Aviso: Não foi possível buscar o último resultado da API da Caixa para atualização.")
+    
     for col in df_completo.columns:
         if 'Bola' in col or 'Concurso' in col:
             df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
+    df_completo.dropna(inplace=True)
     return df_completo.sort_values(by='Concurso').reset_index(drop=True)
 
 @st.cache_data
@@ -89,6 +117,7 @@ def sugerir_universo_estrategico(_df, _todos_os_sorteios, num_sorteios=1000, tam
 def executar_backtest_filtros(_df, n_concursos, min_rep, max_rep, min_imp, max_imp, min_mold, max_mold):
     sorteios_teste = _df.tail(n_concursos).copy()
     sorteios_alinhados = []
+    if len(sorteios_teste) < 2: return []
     for index in range(1, len(sorteios_teste)):
         concurso_atual_row = sorteios_teste.iloc[index]
         concurso_anterior_row = sorteios_teste.iloc[index - 1]
@@ -140,7 +169,6 @@ def treinar_modelo_ia(_todos_os_sorteios):
 # --- INÍCIO DA APLICAÇÃO ---
 st.title("🚀 Analisador Lotofácil Ultra")
 
-# Inicializa o session_state
 if 'sugeridas' not in st.session_state: st.session_state.sugeridas = ""
 if 'sorteios_alinhados' not in st.session_state: st.session_state.sorteios_alinhados = []
 if 'backtest_rodado' not in st.session_state: st.session_state.backtest_rodado = False
