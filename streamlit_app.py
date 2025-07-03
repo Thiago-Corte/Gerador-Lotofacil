@@ -17,7 +17,7 @@ PREMIOS_FIXOS = {11: 6.0, 12: 12.0, 13: 30.0}
 HEATMAP_COLORS_GREEN = ['#F7F7F7', '#D9F0D9', '#B8E5B8', '#98DB98', '#77D177', '#56C756', '#34BE34', '#11B411', '#00AA00', '#008B00']
 HEATMAP_COLORS_RED = ['#F7F7F7', '#FADBD8', '#F5B7B1', '#F0928A', '#EB6E62', '#E6473B', '#E02113', '#C7000E', '#B3000C', '#A2000A']
 
-# --- FUNÇÕES DE PROCESSAMENTO DE DADOS ---
+# --- FUNÇÕES DE PROCESSAMENTO DE DADOS E ANÁLISE ---
 @st.cache_data(ttl=3600)
 def carregar_dados_da_web():
     df_completo = None
@@ -27,7 +27,7 @@ def carregar_dados_da_web():
         df_hist.columns = ['Concurso', 'Data Sorteio', 'Bola1', 'Bola2', 'Bola3', 'Bola4', 'Bola5', 'Bola6', 'Bola7', 'Bola8', 'Bola9', 'Bola10', 'Bola11', 'Bola12', 'Bola13', 'Bola14', 'Bola15']
         df_completo = df_hist
     except FileNotFoundError:
-        st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado no seu repositório do GitHub. A aplicação não pode funcionar sem ele. Por favor, faça o upload do arquivo.")
+        st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado no seu repositório do GitHub.")
         return None
     try:
         url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
@@ -39,7 +39,7 @@ def carregar_dados_da_web():
         if not df_completo['Concurso'].isin([df_ultimo['Concurso'][0]]).any():
             df_completo = pd.concat([df_completo, df_ultimo], ignore_index=True)
     except Exception:
-        st.warning(f"Aviso: Não foi possível buscar o último resultado da API da Caixa.")
+        st.warning(f"Aviso: Não foi possível buscar o último resultado da API.")
     for col in df_completo.columns:
         if 'Bola' in col or 'Concurso' in col:
             df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
@@ -106,18 +106,8 @@ def gerar_mapa_de_calor_plotly(dados, titulo, colorscale):
     volante = [[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15], [16, 17, 18, 19, 20], [21, 22, 23, 24, 25]]
     valores = [[dados.get(num, 0) for num in row] for row in volante]
     anotacoes = [[f"{num}<br>({dados.get(num, 0)})" for num in row] for row in volante]
-    
-    fig = go.Figure(data=go.Heatmap(
-        z=valores, text=anotacoes, texttemplate="%{text}", textfont={"size":12},
-        colorscale=colorscale, showscale=False, xgap=5, ygap=5
-    ))
-
-    fig.update_layout(
-        height=450, margin=dict(t=20, l=10, r=10, b=10),
-        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, autorange='reversed'),
-        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)'
-    )
+    fig = go.Figure(data=go.Heatmap(z=valores, text=anotacoes, texttemplate="%{text}", textfont={"size":12}, colorscale=colorscale, showscale=False, xgap=5, ygap=5))
+    fig.update_layout(height=450, margin=dict(t=20, l=10, r=10, b=10), yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, autorange='reversed'), xaxis=dict(showgrid=False, zeroline=False, showticklabels=False), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
     st.plotly_chart(fig, use_container_width=True)
 
 def extrair_features(jogo):
@@ -150,6 +140,7 @@ def treinar_modelo_ia(_todos_os_sorteios):
 # --- INÍCIO DA APLICAÇÃO ---
 st.title("🚀 Analisador Lotofácil Ultra")
 
+# Inicializa o session_state
 if 'sugeridas' not in st.session_state: st.session_state.sugeridas = ""
 if 'sorteios_alinhados' not in st.session_state: st.session_state.sorteios_alinhados = []
 if 'backtest_rodado' not in st.session_state: st.session_state.backtest_rodado = False
@@ -172,12 +163,11 @@ if df_resultados is not None and not df_resultados.empty:
                 universo = sugerir_universo_estrategico(df_resultados, todos_os_sorteios)
                 st.session_state.sugeridas = ", ".join(map(str, universo))
                 st.session_state.dezenas_gerador = st.session_state.sugeridas
-        
         dezenas_str = st.text_area("Seu universo de dezenas:", value=st.session_state.sugeridas, height=150, key="dezenas_gerador")
         st.subheader("Filtros do Gerador")
         min_rep_gerador, max_rep_gerador = st.slider("Repetidas:", 0, 15, (8, 10), key='slider_rep_gerador')
         min_imp_gerador, max_imp_gerador = st.slider("Ímpares:", 0, 15, (7, 9), key='slider_imp_gerador')
-
+        
         with st.expander("💾 Salvar / Carregar Estratégia"):
             if st.button("Gerar Código para Salvar"):
                 estrategia_atual = {
@@ -199,7 +189,7 @@ if df_resultados is not None and not df_resultados.empty:
                     st.success("Estratégia carregada!")
                     st.experimental_rerun()
                 except Exception:
-                    st.error(f"Erro ao carregar o código. Verifique se está no formato correto.")
+                    st.error(f"Erro ao carregar o código.")
 
     tabs = ["🎯 Gerador", "📊 Análise", "🤖 Filtro I.A.", "✅ Conferidor", "🔬 Backtesting", "💰 Simulação", "🗺️ Mapa de Calor"]
     tab_gerador, tab_analise, tab_ia, tab_conferidor, tab_backtest, tab_simulacao, tab_mapa_calor = st.tabs(tabs)
@@ -272,12 +262,12 @@ if df_resultados is not None and not df_resultados.empty:
                     resultados_ia = []
                     for i, jogo in enumerate(st.session_state.jogos_filtrados):
                         score = probabilidades[i] * 100
-                        resultados_ia.append({"Pontuação I.A.": f"{score:.2f}%", "Jogo": ", ".join(map(str, jogo))})
+                        resultados_ia.append({"Pontuação I.A.": f"{score:.2f}%", "Jogo": ", ".join(map(str, sorted(jogo)))})
                     df_resultados_ia = pd.DataFrame(resultados_ia)
                     df_resultados_ia = df_resultados_ia.sort_values(by="Pontuação I.A.", ascending=False)
                     st.subheader("Ranking de Jogos por Qualidade (segundo a I.A.)")
                     st.dataframe(df_resultados_ia, use_container_width=True)
-    
+
     with tab_conferidor:
         st.header("✅ Conferidor de Jogos")
         st.write("Cole seus jogos e o resultado do sorteio para ver seus acertos.")
@@ -400,10 +390,7 @@ if df_resultados is not None and not df_resultados.empty:
                                 if acertos >= 11:
                                     premios[acertos] += 1
                         custo_total = len(jogos_apostados) * n_concursos_simulacao * CUSTO_APOSTA
-                        receita_11 = premios[11] * PREMIOS_FIXOS[11]
-                        receita_12 = premios[12] * PREMIOS_FIXOS[12]
-                        receita_13 = premios[13] * PREMIOS_FIXOS[13]
-                        receita_total_fixa = receita_11 + receita_12 + receita_13
+                        receita_total_fixa = sum(premios[acertos] * PREMIOS_FIXOS.get(acertos, 0) for acertos in [11, 12, 13])
                         saldo = receita_total_fixa - custo_total
                         st.subheader("Relatório Financeiro da Simulação")
                         c1, c2, c3 = st.columns(3)
@@ -411,9 +398,9 @@ if df_resultados is not None and not df_resultados.empty:
                         c2.metric("Receita (Prêmios Fixos)", f"R$ {receita_total_fixa:,.2f}")
                         c3.metric("Saldo Final", f"R$ {saldo:,.2f}")
                         st.subheader("Detalhamento de Prêmios")
-                        st.success(f"**11 Acertos:** {premios[11]} prêmio(s) (Receita: R$ {receita_11:,.2f})")
-                        st.success(f"**12 Acertos:** {premios[12]} prêmio(s) (Receita: R$ {receita_12:,.2f})")
-                        st.success(f"**13 Acertos:** {premios[13]} prêmio(s) (Receita: R$ {receita_13:,.2f})")
+                        st.success(f"**11 Acertos:** {premios[11]} prêmio(s) (Receita: R$ {premios[11] * PREMIOS_FIXOS[11]:,.2f})")
+                        st.success(f"**12 Acertos:** {premios[12]} prêmio(s) (Receita: R$ {premios[12] * PREMIOS_FIXOS[12]:,.2f})")
+                        st.success(f"**13 Acertos:** {premios[13]} prêmio(s) (Receita: R$ {premios[13] * PREMIOS_FIXOS[13]:,.2f})")
                         st.warning(f"**14 Acertos:** {premios[14]} prêmio(s) (valor variável)")
                         st.error(f"**15 Acertos:** {premios[15]} prêmio(s) (valor variável)")
             except Exception:
