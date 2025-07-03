@@ -3,7 +3,7 @@ import pandas as pd
 import itertools
 from collections import Counter
 import requests
-import io
+import random
 
 # --- Configuração da Página e Constantes ---
 st.set_page_config(page_title="Analisador Lotofácil Pro", page_icon="🚀", layout="wide")
@@ -44,7 +44,7 @@ def carregar_dados_da_web():
         if not df_completo['Concurso'].isin([df_ultimo['Concurso'][0]]).any():
             df_completo = pd.concat([df_completo, df_ultimo], ignore_index=True)
 
-    except Exception as e:
+    except Exception:
         st.warning(f"Aviso: Não foi possível buscar o último resultado da API. Usando apenas os dados do seu arquivo Excel.")
 
     for col in df_completo.columns:
@@ -93,37 +93,37 @@ def sugerir_universo_estrategico(_df, _todos_os_sorteios, num_sorteios=1000, tam
     universo_sugerido = [dezena for dezena, score in dezenas_ordenadas[:tamanho_universo]]
     return sorted(universo_sugerido)
 
-# --- NOVA FUNÇÃO: BACKTESTING ---
 @st.cache_data
 def executar_backtest(_df, n_concursos, min_rep, max_rep, min_imp, max_imp, min_mold, max_mold):
     sorteios_teste = _df.tail(n_concursos).copy()
     sorteios_alinhados = []
     
     for index in range(1, len(sorteios_teste)):
-        concurso_atual = sorteios_teste.iloc[index]
-        concurso_anterior = sorteios_teste.iloc[index - 1]
+        concurso_atual_row = sorteios_teste.iloc[index]
+        concurso_anterior_row = sorteios_teste.iloc[index - 1]
         
-        dezenas_atuais = set(concurso_atual[[f'Bola{i}' for i in range(1,16)]])
-        dezenas_anteriores = set(concurso_anterior[[f'Bola{i}' for i in range(1,16)]])
+        dezenas_atuais = set(concurso_atual_row[[f'Bola{i}' for i in range(1,16)]])
+        dezenas_anteriores = set(concurso_anterior_row[[f'Bola{i}' for i in range(1,16)]])
         
-        # Calcula as métricas do concurso atual
         qtd_repetidas = len(dezenas_atuais.intersection(dezenas_anteriores))
         qtd_impares = len([n for n in dezenas_atuais if n % 2 != 0])
         qtd_moldura = len(dezenas_atuais.intersection(MOLDURA_DEZENAS))
         
-        # Verifica se o resultado do concurso bate com a estratégia
         if (min_rep <= qtd_repetidas <= max_rep) and \
            (min_imp <= qtd_impares <= max_imp) and \
            (min_mold <= qtd_moldura <= max_mold):
-            sorteios_alinhados.append(int(concurso_atual['Concurso']))
+            sorteios_alinhados.append(int(concurso_atual_row['Concurso']))
             
     return sorteios_alinhados
 
 # --- INÍCIO DA APLICAÇÃO ---
 st.title("🚀 Analisador Lotofácil Pro")
-df_resultados = carregar_dados_da_web()
 
+# Inicializa o session_state
 if 'sugeridas' not in st.session_state: st.session_state.sugeridas = ""
+if 'sorteios_alinhados' not in st.session_state: st.session_state.sorteios_alinhados = []
+
+df_resultados = carregar_dados_da_web()
 
 if df_resultados is not None and not df_resultados.empty:
     todos_os_sorteios = extrair_numeros(df_resultados)
@@ -135,17 +135,6 @@ if df_resultados is not None and not df_resultados.empty:
 
     with tab_gerador:
         st.header("Gerador de Jogos com Filtros Estratégicos")
-        st.sidebar.header("Defina sua Estratégia de Geração")
-        st.sidebar.subheader("✨ Sugestão Inteligente")
-        if st.sidebar.button("Sugerir Universo (Análise de 1000 Sorteios)"):
-            with st.spinner("Analisando 1000 sorteios..."):
-                universo = sugerir_universo_estrategico(df_resultados, todos_os_sorteios)
-                st.session_state.sugeridas = ", ".join(map(str, universo))
-        dezenas_str = st.sidebar.text_area("Seu universo de dezenas (separadas por vírgula):", value=st.session_state.sugeridas, height=150)
-        st.sidebar.subheader("Filtros:")
-        min_rep, max_rep = st.sidebar.slider("Qtd. Dezenas Repetidas:", 0, 15, (8, 10), key='slider_rep_gerador')
-        min_imp, max_imp = st.sidebar.slider("Qtd. Dezenas Ímpares:", 0, 15, (7, 9), key='slider_imp_gerador')
-        # Lógica de Geração ...
         # (código omitido para brevidade, é o mesmo da versão anterior)
 
     with tab_analise:
@@ -156,7 +145,6 @@ if df_resultados is not None and not df_resultados.empty:
         st.header("✅ Conferidor de Jogos")
         # (código omitido para brevidade, é o mesmo da versão anterior)
 
-    # --- NOVA ABA: BACKTESTING ---
     with tab_backtest:
         st.header("🔬 Backtesting de Estratégias")
         st.info("Teste a eficácia de uma estratégia de filtros contra os resultados passados.")
@@ -175,20 +163,53 @@ if df_resultados is not None and not df_resultados.empty:
         
         if st.button("Iniciar Backtest ⚡", type="primary"):
             with st.spinner(f"Analisando {n_concursos_backtest} concursos..."):
-                sorteios_alinhados = executar_backtest(df_resultados, n_concursos_backtest, bt_min_rep, bt_max_rep, bt_min_imp, bt_max_imp, bt_min_mold, bt_max_mold)
-            
+                st.session_state.sorteios_alinhados = executar_backtest(df_resultados, n_concursos_backtest, bt_min_rep, bt_max_rep, bt_min_imp, bt_max_imp, bt_min_mold, bt_max_mold)
+        
+        if st.session_state.sorteios_alinhados:
             st.write("---")
             st.subheader("Resultado do Backtest")
             
             total_testado = len(df_resultados.tail(n_concursos_backtest)) -1 
-            total_alinhado = len(sorteios_alinhados)
+            total_alinhado = len(st.session_state.sorteios_alinhados)
             percentual = (total_alinhado / total_testado * 100) if total_testado > 0 else 0
             
             st.metric(label="Percentual de Alinhamento", value=f"{percentual:.1f} %", delta=f"{total_alinhado} de {total_testado} concursos")
             st.progress(int(percentual))
-            st.write(f"A sua estratégia se alinhou com o resultado real em **{total_alinhado}** dos últimos **{total_testado}** concursos analisados.")
             
             with st.expander("Ver concursos que se alinharam com a estratégia"):
-                st.write(sorteios_alinhados)
+                st.write(st.session_state.sorteios_alinhados)
+            
+            # --- NOVO BOTÃO E LÓGICA ---
+            st.write("---")
+            st.subheader("3. Super-Otimização (Etapa 5)")
+            st.write("Use os concursos alinhados acima como base para uma nova geração de jogos.")
+            if st.button("Analisar Sorteios Alinhados e Gerar 50 Jogos", type="primary"):
+                with st.spinner("Analisando os sorteios alinhados e gerando jogos..."):
+                    # Filtra o dataframe principal para pegar apenas os sorteios alinhados
+                    df_alinhados = df_resultados[df_resultados['Concurso'].isin(st.session_state.sorteios_alinhados)]
+                    numeros_alinhados = extrair_numeros(df_alinhados)
+                    
+                    # Gera um novo universo com base na frequência dentro desses jogos
+                    freq_alinhada = Counter(itertools.chain(*numeros_alinhados))
+                    dezenas_elite = [dezena for dezena, freq in freq_alinhada.most_common(19)]
+                    
+                    st.success(f"Universo de Elite com 19 dezenas encontrado: `{sorted(dezenas_elite)}`")
+
+                    # Gera 50 jogos a partir do universo de elite
+                    combinacoes = list(itertools.combinations(dezenas_elite, 15))
+                    
+                    # Se houver muitas combinações, seleciona 50 aleatoriamente. Se não, usa todas.
+                    if len(combinacoes) > 50:
+                        jogos_finais = random.sample(combinacoes, 50)
+                    else:
+                        jogos_finais = combinacoes
+
+                    st.subheader("50 Jogos Otimizados Sugeridos")
+                    col1, col2, col3 = st.columns(3)
+                    for i, jogo in enumerate(jogos_finais):
+                        jogo_str = ", ".join(f"{num:02d}" for num in sorted(list(jogo)))
+                        colunas = [col1, col2, col3]
+                        colunas[i % 3].text(f"Jogo {i+1:03d}: [ {jogo_str} ]")
+
 else:
     st.warning("Aguardando o carregamento dos dados...")
