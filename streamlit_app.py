@@ -185,8 +185,37 @@ if df_resultados is not None and not df_resultados.empty:
         with c2:
             resultado_str = st.text_input("Digite o resultado do sorteio (15 dezenas separadas por vírgula)")
         if st.button("Conferir Meus Jogos", type="primary"):
-            # Lógica do Conferidor...
-            
+            try:
+                resultado_set = set([int(num.strip()) for num in resultado_str.split(',') if num.strip().isdigit()])
+                if len(resultado_set) != 15:
+                    st.error("Erro: O resultado do sorteio deve conter exatamente 15 números válidos.")
+                else:
+                    linhas = jogos_para_conferir.strip().split('\n')
+                    jogos = [set([int(num.strip()) for num in linha.replace('[', '').replace(']', '').split(',') if num.strip().isdigit()]) for linha in linhas if linha]
+                    if not jogos:
+                        st.warning("Nenhum jogo para conferir. Por favor, cole seus jogos na área de texto.")
+                    else:
+                        st.subheader("Resultado da Conferência")
+                        resultados_conferencia = []
+                        premios = Counter()
+                        for i, jogo_set in enumerate(jogos):
+                            if len(jogo_set) > 0:
+                                acertos = len(jogo_set.intersection(resultado_set))
+                                jogo_formatado = ", ".join(map(str, sorted(list(jogo_set))))
+                                resultados_conferencia.append({'Jogo': jogo_formatado, 'Acertos': acertos})
+                                if acertos >= 11:
+                                    premios[acertos] += 1
+                        df_conferencia = pd.DataFrame(resultados_conferencia)
+                        st.dataframe(df_conferencia, use_container_width=True)
+                        st.subheader("Resumo de Prêmios")
+                        if sum(premios.values()) > 0:
+                            for acertos, qtd in sorted(premios.items(), reverse=True):
+                                st.success(f"Você teve **{qtd}** jogo(s) com **{acertos}** acertos!")
+                        else:
+                            st.info("Nenhum jogo premiado (11 ou mais acertos).")
+            except Exception:
+                st.error(f"Ocorreu um erro ao conferir os jogos. Verifique se os números foram digitados corretamente.")
+
     with tab_backtest:
         st.header("🔬 Backtesting de Filtros")
         st.info("Valide a eficácia de uma estratégia de filtros contra os resultados passados.")
@@ -211,20 +240,16 @@ if df_resultados is not None and not df_resultados.empty:
             st.progress(int(percentual))
             with st.expander("Ver concursos que se alinharam com a estratégia"):
                 st.write(st.session_state.sorteios_alinhados)
-
+    
     with tab_simulacao:
-        st.header("💰 Simulação Avançada (Pós-Backtest)")
-        st.info("Use os resultados de um backtest (da aba anterior) para análises mais profundas.")
+        st.header("💰 Simulação Avançada")
+        st.info("Use os resultados de um backtest (da aba anterior) ou cole um conjunto de jogos para análises avançadas.")
 
-        if not st.session_state.get('sorteios_alinhados'):
-            st.warning("Você precisa primeiro rodar uma validação na aba 'Backtesting de Filtros' para habilitar as simulações avançadas.")
-        else:
-            total_alinhado = len(st.session_state.sorteios_alinhados)
-            st.success(f"**Base de análise:** {total_alinhado} sorteios alinhados com a sua estratégia foram encontrados.")
-            
-            # GERAÇÃO ULTRA
-            st.subheader("Gerador Ultra")
-            st.write("Gere 50 jogos baseados nas dezenas e combinações mais fortes encontradas nos sorteios alinhados.")
+        if st.session_state.get('sorteios_alinhados'):
+            total_alinhado_sim = len(st.session_state.sorteios_alinhados)
+            st.success(f"**Base de análise pronta:** {total_alinhado_sim} sorteios da sua última validação estão carregados.")
+
+            st.subheader("Gerador Ultra (Baseado no Backtest)")
             if st.button("Gerar 50 Jogos 'Ultra' 💎", type="primary"):
                 with st.spinner("Analisando os sorteios alinhados e gerando jogos..."):
                     df_alinhados = df_resultados[df_resultados['Concurso'].isin(st.session_state.sorteios_alinhados)]
@@ -233,7 +258,6 @@ if df_resultados is not None and not df_resultados.empty:
                     universo_elite = [dezena for dezena, freq in freq_alinhada.most_common(19)]
                     top_pares = encontrar_combinacoes_frequentes(numeros_alinhados, 2, top_n=20)
                     top_trios = encontrar_combinacoes_frequentes(numeros_alinhados, 3, top_n=20)
-                    
                     st.info(f"Universo de Elite com 19 dezenas encontrado: `{sorted(universo_elite)}`")
                     candidatos = list(itertools.combinations(universo_elite, 15))
                     jogos_com_score = []
@@ -247,20 +271,49 @@ if df_resultados is not None and not df_resultados.empty:
                         jogos_com_score.append((jogo, score))
                     jogos_com_score.sort(key=lambda x: x[1], reverse=True)
                     jogos_finais = [jogo for jogo, score in jogos_com_score[:50]]
-                    
                     st.subheader("🏆 Top 50 Jogos Gerados com a Estratégia Ultra")
                     c1, c2, c3 = st.columns(3)
                     for i, jogo in enumerate(jogos_finais):
                         jogo_str = ", ".join(f"{num:02d}" for num in sorted(list(jogo)))
                         [c1,c2,c3][i % 3].text(f"Jogo {i+1:03d}: [ {jogo_str} ]")
 
-            st.write("---")
-            # CUSTO/BENEFÍCIO
-            st.subheader("Simulação de Custo/Benefício")
-            jogos_para_simular = st.text_area("Cole aqui os jogos que você quer testar (um por linha)", height=200, placeholder="Ex: [ 01, 02, ... ]")
-            n_concursos_simulacao = st.number_input("Simular apostas nos últimos X concursos:", min_value=10, max_value=len(df_resultados)-1, value=100, step=10, key="n_simulacao")
-            if st.button("Calcular Custo/Benefício 💰"):
-                # Lógica do Custo/Benefício
-                
+        st.write("---")
+        st.subheader("Simulação de Custo/Benefício")
+        jogos_para_simular = st.text_area("Cole aqui os jogos que você quer testar (um por linha)", height=200, placeholder="Ex: 01, 02, 03...")
+        n_concursos_simulacao = st.number_input("Simular apostas nos últimos X concursos:", min_value=10, max_value=len(df_resultados)-1, value=50, step=10, key="n_simulacao")
+        if st.button("Calcular Custo/Benefício 💰"):
+            try:
+                linhas_simulacao = jogos_para_simular.strip().split('\n')
+                jogos_apostados = [set(int(num.strip()) for num in linha.replace('[', '').replace(']', '').split(',') if num.strip()) for linha in linhas_simulacao if linha]
+                if not jogos_apostados:
+                    st.error("Nenhum jogo válido encontrado para simular.")
+                else:
+                    with st.spinner(f"Simulando {len(jogos_apostados)} jogos em {n_concursos_simulacao} concursos..."):
+                        sorteios_para_teste = todos_os_sorteios[-n_concursos_simulacao:]
+                        premios = Counter()
+                        for sorteio_resultado in sorteios_para_teste:
+                            for aposta in jogos_apostados:
+                                acertos = len(aposta.intersection(set(sorteio_resultado)))
+                                if acertos >= 11:
+                                    premios[acertos] += 1
+                        custo_total = len(jogos_apostados) * n_concursos_simulacao * CUSTO_APOSTA
+                        receita_11 = premios[11] * PREMIO_11_ACERTOS
+                        receita_12 = premios[12] * PREMIO_12_ACERTOS
+                        receita_13 = premios[13] * PREMIO_13_ACERTOS
+                        receita_total_fixa = receita_11 + receita_12 + receita_13
+                        saldo = receita_total_fixa - custo_total
+                        st.subheader("Relatório Financeiro da Simulação")
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("Custo Total Estimado", f"R$ {custo_total:,.2f}")
+                        c2.metric("Receita (Prêmios Fixos)", f"R$ {receita_total_fixa:,.2f}")
+                        c3.metric("Saldo Final", f"R$ {saldo:,.2f}")
+                        st.subheader("Detalhamento de Prêmios")
+                        st.success(f"**11 Acertos:** {premios[11]} prêmio(s) (Receita: R$ {receita_11:,.2f})")
+                        st.success(f"**12 Acertos:** {premios[12]} prêmio(s) (Receita: R$ {receita_12:,.2f})")
+                        st.success(f"**13 Acertos:** {premios[13]} prêmio(s) (Receita: R$ {receita_13:,.2f})")
+                        st.warning(f"**14 Acertos:** {premios[14]} prêmio(s) (valor variável)")
+                        st.error(f"**15 Acertos:** {premios[15]} prêmio(s) (valor variável)")
+            except Exception:
+                st.error("Ocorreu um erro ao processar os jogos colados para simulação.")
 else:
     st.warning("Aguardando o carregamento dos dados...")
