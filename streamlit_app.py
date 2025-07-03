@@ -12,6 +12,9 @@ PREMIO_11_ACERTOS = 6.0
 PREMIO_12_ACERTOS = 12.0
 PREMIO_13_ACERTOS = 30.0
 CUSTO_APOSTA = 3.0
+# --- NOVA PALETA DE CORES PARA O MAPA DE CALOR ---
+HEATMAP_COLORS = ['#F0F0F0', '#D4E8D4', '#B9E0B9', '#9EDB9E', '#82D382', '#67C967', '#4CBF4C', '#30B430', '#15AA15', '#00A000']
+
 
 # --- FUNÇÕES DE PROCESSAMENTO DE DADOS ---
 @st.cache_data(ttl=3600)
@@ -35,7 +38,7 @@ def carregar_dados_da_web():
         if not df_completo['Concurso'].isin([df_ultimo['Concurso'][0]]).any():
             df_completo = pd.concat([df_completo, df_ultimo], ignore_index=True)
     except Exception:
-        st.warning(f"Aviso: Não foi possível buscar o último resultado da API da Caixa. Usando apenas os dados do seu arquivo Excel.")
+        st.warning(f"Aviso: Não foi possível buscar o último resultado da API da Caixa.")
     for col in df_completo.columns:
         if 'Bola' in col or 'Concurso' in col:
             df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
@@ -97,21 +100,36 @@ def executar_backtest_filtros(_df, n_concursos, min_rep, max_rep, min_imp, max_i
             sorteios_alinhados.append(int(concurso_atual_row['Concurso']))
     return sorteios_alinhados
 
+# --- FUNÇÃO DO MAPA DE CALOR (REESCRITA) ---
 def gerar_mapa_de_calor(dados, titulo):
     st.subheader(titulo)
+    
     min_val = min(dados.values())
     max_val = max(dados.values())
-    dados_normalizados = {k: (v - min_val) / (max_val - min_val) if (max_val - min_val) > 0 else 0.5 for k, v in dados.items()}
+    
     html = "<div style='display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px;'>"
     for i in range(1, 26):
         valor = dados.get(i, 0)
-        score = dados_normalizados.get(i, 0.5)
-        red = int(240 - 240 * score)
-        green = int(240 - (240 - 100) * score)
-        blue = int(240 - 240 * score)
-        cor_texto = "white" if score > 0.6 else "black"
+        
+        # Normaliza o valor para encontrar o índice da cor
+        if (max_val - min_val) > 0:
+            score_normalizado = (valor - min_val) / (max_val - min_val)
+        else:
+            score_normalizado = 0.5 # Caso todos os valores sejam iguais
+            
+        # Pega o índice da cor na paleta
+        cor_index = int(score_normalizado * (len(HEATMAP_COLORS) - 1))
+        cor_hex = HEATMAP_COLORS[cor_index]
+
+        # Define a cor do texto para garantir a legibilidade
+        # Converte o hex para RGB para calcular o brilho
+        h = cor_hex.lstrip('#')
+        r, g, b = tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+        brilho = (r*299 + g*587 + b*114) / 1000
+        cor_texto = 'white' if brilho < 128 else 'black'
+
         html += f"""
-        <div style='background-color: rgb({red},{green},{blue}); border-radius: 8px; padding: 10px; text-align: center; color: {cor_texto}; border: 1px solid #ddd;'>
+        <div style='background-color: {cor_hex}; border-radius: 8px; padding: 10px; text-align: center; color: {cor_texto}; border: 1px solid #ddd;'>
             <div style='font-size: 1.2em; font-weight: bold;'>{i:02d}</div>
             <div style='font-size: 0.8em;'>({valor})</div>
         </div>
@@ -138,6 +156,7 @@ if df_resultados is not None and not df_resultados.empty:
     tab_gerador, tab_analise, tab_conferidor, tab_backtest, tab_simulacao, tab_mapa_calor = st.tabs(tabs)
 
     with tab_gerador:
+        # Código completo da aba Gerador...
         st.header("Gerador de Jogos com Filtros Estratégicos")
         st.sidebar.header("Defina sua Estratégia de Geração")
         st.sidebar.subheader("✨ Sugestão Inteligente")
@@ -264,18 +283,15 @@ if df_resultados is not None and not df_resultados.empty:
     
     with tab_simulacao:
         st.header("💰 Simulação Avançada")
-        st.info("Use os resultados de um backtest (da aba 'Backtesting de Filtros') ou cole um conjunto de jogos para análises avançadas.")
+        st.info("Use os resultados de um backtest (da aba anterior) ou cole um conjunto de jogos para análises avançadas.")
         st.write("---")
-
         if st.session_state.get('sorteios_alinhados'):
             total_alinhado_sim = len(st.session_state.sorteios_alinhados)
             st.success(f"**Base de análise pronta:** {total_alinhado_sim} sorteios da sua última validação estão carregados.")
-            
             df_alinhados = df_resultados[df_resultados['Concurso'].isin(st.session_state.sorteios_alinhados)]
             numeros_alinhados = extrair_numeros(df_alinhados)
             freq_alinhada = Counter(itertools.chain(*numeros_alinhados))
             df_freq_alinhada = pd.DataFrame(freq_alinhada.items(), columns=['Dezena', 'Frequência (nos Alinhados)']).sort_values(by='Frequência (nos Alinhados)', ascending=False).set_index('Dezena')
-            
             st.subheader("Análise dos Sorteios Alinhados")
             st.dataframe(df_freq_alinhada, use_container_width=True)
             if st.button("Gerar 50 Jogos 'Ultra' 💎", type="primary"):
@@ -302,8 +318,7 @@ if df_resultados is not None and not df_resultados.empty:
                         jogo_str = ", ".join(f"{num:02d}" for num in sorted(list(jogo)))
                         [c1,c2,c3][i % 3].text(f"Jogo {i+1:03d}: [ {jogo_str} ]")
         else:
-            st.warning("Você precisa primeiro rodar uma validação na aba 'Backtesting de Filtros' para habilitar a Geração Ultra.")
-        
+            st.warning("Você precisa primeiro rodar uma validação na aba 'Backtesting de Filtros' para habilitar as simulações.")
         st.write("---")
         st.subheader("Simulação de Custo/Benefício")
         jogos_para_simular = st.text_area("Cole aqui os jogos que você quer testar (um por linha)", height=200, placeholder="Ex: 01, 02, 03...")
@@ -340,8 +355,8 @@ if df_resultados is not None and not df_resultados.empty:
                         st.success(f"**13 Acertos:** {premios[13]} prêmio(s) (Receita: R$ {receita_13:,.2f})")
                         st.warning(f"**14 Acertos:** {premios[14]} prêmio(s) (valor variável)")
                         st.error(f"**15 Acertos:** {premios[15]} prêmio(s) (valor variável)")
-            except Exception:
-                st.error("Ocorreu um erro ao processar os jogos colados para simulação.")
+            except Exception as e:
+                st.error(f"Ocorreu um erro ao processar os jogos colados para simulação.")
 
     with tab_mapa_calor:
         st.header("🗺️ Mapa de Calor do Volante")
