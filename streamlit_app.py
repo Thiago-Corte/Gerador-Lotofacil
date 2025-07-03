@@ -12,6 +12,12 @@ st.set_page_config(page_title="Analisador Lotofácil", page_icon="🎲", layout=
 def extrair_numeros(df):
     """Extrai todos os números sorteados para uma lista de listas."""
     numeros_cols = [f'Bola{i}' for i in range(1, 16)]
+    # Garante que todas as colunas de bolas sejam convertidas para um tipo numérico, tratando erros
+    for col in numeros_cols:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    # Remove linhas que possam ter ficado com valores nulos após a conversão
+    df.dropna(subset=numeros_cols, inplace=True)
+    df[numeros_cols] = df[numeros_cols].astype(int)
     return df[numeros_cols].values.tolist()
 
 @st.cache_data
@@ -23,10 +29,11 @@ def analisar_frequencia_e_atraso(numeros_sorteados):
     total_concursos = len(numeros_sorteados)
     for dezena in range(1, 26):
         try:
-            ultimo_sorteio = max(i for i, sorteio in enumerate(numeros_sorteados) if dezena in sorteio)
-            atraso[dezena] = total_concursos - 1 - ultimo_sorteio
+            # Encontra o índice do último concurso em que a dezena apareceu
+            ultimo_sorteio_idx = max(i for i, sorteio in enumerate(numeros_sorteados) if dezena in sorteio)
+            atraso[dezena] = total_concursos - 1 - ultimo_sorteio_idx
         except ValueError:
-            atraso[dezena] = total_concursos  # Nunca foi sorteada
+            atraso[dezena] = total_concursos  # Se nunca foi sorteada
             
     return frequencia, atraso
 
@@ -48,7 +55,7 @@ uploaded_file = st.sidebar.file_uploader("Escolha o seu arquivo Lotofácil.xlsx"
 
 if uploaded_file is None:
     st.info("⬅️ **Comece fazendo o upload da sua planilha na barra lateral para carregar os dados.**")
-    st.image("https://i.imgur.com/3_Infografico_Lotofacil_Dezenas.png", caption="Exemplo de análise de dezenas.")
+    st.image("https://i.imgur.com/gKUK44F.png", caption="Exemplo de análise que será gerada.")
 else:
     df_resultados = pd.read_excel(uploaded_file)
     todos_os_sorteios = extrair_numeros(df_resultados)
@@ -73,7 +80,7 @@ else:
             st.write(f"**Universo de {len(dezenas_escolhidas)} dezenas escolhido:** `{dezenas_escolhidas}`")
 
             ultimo_concurso_numeros = set(todos_os_sorteios[-1])
-            st.info(f"Analisando com base no Concurso **{df_resultados.iloc[-1]['Concurso']}** de dezenas: `{sorted(list(ultimo_concurso_numeros))}`")
+            st.info(f"Analisando com base no Concurso **{int(df_resultados.iloc[-1]['Concurso'])}** de dezenas: `{sorted(list(ultimo_concurso_numeros))}`")
             
             if st.button("Gerar Jogos 🚀", type="primary"):
                 if len(dezenas_escolhidas) < 15:
@@ -90,7 +97,9 @@ else:
                     st.success(f"De **{len(combinacoes)}** jogos possíveis, **{len(jogos_filtrados)}** foram selecionados após os filtros.")
                     if jogos_filtrados:
                         st.write("---")
+                        # AQUI ESTÁ A CORREÇÃO: Definindo as colunas e a variável 'colunas'
                         col1, col2, col3 = st.columns(3)
+                        colunas = [col1, col2, col3]
                         for i, jogo in enumerate(jogos_filtrados):
                             jogo_str = ", ".join(f"{num:02d}" for num in jogo)
                             colunas[i % 3].text(f"Jogo {i+1:03d}: [ {jogo_str} ]")
