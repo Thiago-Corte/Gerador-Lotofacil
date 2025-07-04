@@ -1,27 +1,3 @@
-Ok. Eu entendo. Você está certo, vamos tentar por aqui, da forma mais direta possível. Peço desculpas por todos os problemas até agora. Minha prioridade é que você tenha a ferramenta funcionando.
-
-Para garantir que funcione desta vez, eu modifiquei o código de uma forma crucial: ele não vai mais precisar que você tenha o arquivo Lotofácil.xlsx. A aplicação vai baixar todo o histórico de um link público e confiável e o atualizará com os dados da Caixa.
-
-Você só precisa criar dois arquivos no seu computador.
-
-Passo 1: Crie o arquivo requirements.txt
-Crie uma pasta nova e vazia no seu computador. Exemplo: C:\AnalisadorLotofacil
-
-Dentro dessa pasta, crie um novo arquivo de texto e nomeie-o exatamente como requirements.txt.
-
-Abra o arquivo e cole o conteúdo abaixo. Não pode haver mais nada no arquivo.
-
-streamlit
-pandas
-openpyxl
-requests
-plotly
-scikit-learn
-Passo 2: Crie o arquivo streamlit_app.py
-Agora, o arquivo principal. Dentro da mesma pasta, crie um arquivo chamado streamlit_app.py e cole nele o código completo abaixo, do início ao fim, sem exceção.
-
-Python
-
 import streamlit as st
 import pandas as pd
 import itertools
@@ -43,21 +19,19 @@ HEATMAP_COLORS_RED = ['#F7F7F7', '#FADBD8', '#F5B7B1', '#F0928A', '#EB6E62', '#E
 
 # --- FUNÇÕES DE PROCESSAMENTO DE DADOS E ANÁLISE ---
 @st.cache_data(ttl=3600)
-def carregar_dados_da_web():
+def carregar_dados_locais_e_api():
     df_completo = None
     try:
-        # URL direta para um arquivo de histórico público e confiável
-        url_historico = "https://raw.githubusercontent.com/g-bolsoni/Lotofacil-Analysis/main/Lotof%C3%A1cil.xlsx"
-        df_hist = pd.read_excel(url_historico)
+        df_hist = pd.read_excel("Lotofácil.xlsx")
         df_hist = df_hist.iloc[:, :17]
         df_hist.columns = ['Concurso', 'Data Sorteio', 'Bola1', 'Bola2', 'Bola3', 'Bola4', 'Bola5', 'Bola6', 'Bola7', 'Bola8', 'Bola9', 'Bola10', 'Bola11', 'Bola12', 'Bola13', 'Bola14', 'Bola15']
         df_completo = df_hist
-    except Exception as e:
-        st.error(f"Não foi possível carregar o histórico base da internet. Erro: {e}")
+    except FileNotFoundError:
+        st.error("ERRO CRÍTICO: O arquivo 'Lotofácil.xlsx' não foi encontrado na mesma pasta do programa.")
         return None
     try:
-        url_api = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
-        response = requests.get(url_api, headers={'User-Agent': 'Mozilla/5.0'}, verify=False)
+        url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
+        response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, verify=False)
         response.raise_for_status()
         data = response.json()
         ultimo_resultado = {'Concurso': data.get('numero'), 'Data Sorteio': data.get('dataApuracao'), **{f'Bola{i+1}': int(dezena) for i, dezena in enumerate(data.get('listaDezenas', []))}}
@@ -65,12 +39,10 @@ def carregar_dados_da_web():
         if not df_completo['Concurso'].isin([df_ultimo['Concurso'][0]]).any():
             df_completo = pd.concat([df_completo, df_ultimo], ignore_index=True)
     except Exception:
-        st.warning(f"Aviso: Não foi possível buscar o último resultado da API da Caixa para atualização.")
-    
+        st.warning(f"Aviso: Não foi possível buscar o último resultado da API. Usando apenas os dados do seu arquivo Excel.")
     for col in df_completo.columns:
         if 'Bola' in col or 'Concurso' in col:
             df_completo[col] = pd.to_numeric(df_completo[col], errors='coerce')
-    df_completo.dropna(inplace=True)
     return df_completo.sort_values(by='Concurso').reset_index(drop=True)
 
 @st.cache_data
@@ -169,13 +141,14 @@ def treinar_modelo_ia(_todos_os_sorteios):
 # --- INÍCIO DA APLICAÇÃO ---
 st.title("🚀 Analisador Lotofácil Ultra")
 
+# Inicializa o session_state para persistir dados na sessão
 if 'sugeridas' not in st.session_state: st.session_state.sugeridas = ""
 if 'sorteios_alinhados' not in st.session_state: st.session_state.sorteios_alinhados = []
 if 'backtest_rodado' not in st.session_state: st.session_state.backtest_rodado = False
 if 'codigo_estrategia' not in st.session_state: st.session_state.codigo_estrategia = ""
 if 'jogos_filtrados' not in st.session_state: st.session_state.jogos_filtrados = []
 
-df_resultados = carregar_dados_da_web()
+df_resultados = carregar_dados_locais_e_api()
 
 if df_resultados is not None and not df_resultados.empty:
     todos_os_sorteios = extrair_numeros(df_resultados)
@@ -191,6 +164,7 @@ if df_resultados is not None and not df_resultados.empty:
                 universo = sugerir_universo_estrategico(df_resultados, todos_os_sorteios)
                 st.session_state.sugeridas = ", ".join(map(str, universo))
                 st.session_state.dezenas_gerador = st.session_state.sugeridas
+        
         dezenas_str = st.text_area("Seu universo de dezenas:", value=st.session_state.sugeridas, height=150, key="dezenas_gerador")
         st.subheader("Filtros do Gerador")
         min_rep_gerador, max_rep_gerador = st.slider("Repetidas:", 0, 15, (8, 10), key='slider_rep_gerador')
@@ -198,11 +172,7 @@ if df_resultados is not None and not df_resultados.empty:
         
         with st.expander("💾 Salvar / Carregar Estratégia"):
             if st.button("Gerar Código para Salvar"):
-                estrategia_atual = {
-                    "universo_dezenas": st.session_state.dezenas_gerador,
-                    "filtro_repetidas": st.session_state.slider_rep_gerador,
-                    "filtro_impares": st.session_state.slider_imp_gerador
-                }
+                estrategia_atual = {"universo_dezenas": st.session_state.dezenas_gerador,"filtro_repetidas": st.session_state.slider_rep_gerador,"filtro_impares": st.session_state.slider_imp_gerador}
                 st.session_state.codigo_estrategia = json.dumps(estrategia_atual, indent=2)
             if st.session_state.codigo_estrategia:
                 st.code(st.session_state.codigo_estrategia, language='json')
@@ -210,7 +180,6 @@ if df_resultados is not None and not df_resultados.empty:
             if st.button("Carregar Estratégia"):
                 try:
                     dados_carregados = json.loads(codigo_para_carregar)
-                    st.session_state.sugeridas = dados_carregados.get("universo_dezenas", "")
                     st.session_state.dezenas_gerador = dados_carregados.get("universo_dezenas", "")
                     st.session_state.slider_rep_gerador = tuple(dados_carregados.get("filtro_repetidas", (8, 10)))
                     st.session_state.slider_imp_gerador = tuple(dados_carregados.get("filtro_impares", (7, 9)))
